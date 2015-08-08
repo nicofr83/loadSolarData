@@ -480,155 +480,29 @@ namespace loadData
     public enum valueDTP { INT = 1, DOUBLE = 2, STRING = 3, M3INT = 10, M3DOUBLE = 11 };
     public class valueVal
     {
-        // indice = colNo defined in inverter
-        List<valueDTP> dType;
         public object val;
 
         public valueVal()
         {
-            dType = new List<valueDTP>(glob.MAX_VALUES);
             val = (object) new List<object>(glob.MAX_VALUES);
         }
-        public Boolean isMeasureExist(int no, valueDTP dataType)
+        public void checkSlot(int no)
         {
             List<object> valObj = (List<object>)val;
-            if (no >= valObj.Count)
-                return false;
-            if ( dType[no] != dataType)
-                throw new Exception("bad data value type");
-
-            return true;
+            while (no > valObj.Count)
+                valObj.Add(null);
         }
-        public void checkSlot(int no, valueDTP valueDataType)
+        public object getValue(int no)
         {
-            if (no < dType.Count)
-                return;
-            if (no != dType.Count)
-                throw new Exception("creation of multiple slots... ???");
-
-            dType.Add(valueDataType);
+            checkSlot(no);
             List<object> valObj = (List<object>)val;
-            valObj.Add(null);
-
-            if (dType.Count != valObj.Count())
-                throw new Exception("measureAdd: internal inconsistency");
+            return valObj[no];
         }
-
-        public int measureAdd(valueDTP dtypeMeasure)
+        public void setValue(int no, object value)
         {
-            // Add value
-            dType.Add(dtypeMeasure);
-            // add value
+            checkSlot(no);
             List<object> valObj = (List<object>)val;
-            valObj.Add(null);
-
-            if (dType.Count != valObj.Count())
-                throw new Exception("measureAdd: internal inconsistency");
-            return dType.Count-1;
-        }
-        void checkNo(int no)
-        {
-            List<object> objVal = (List<object>)val;
-            if (no >= objVal.Count)
-                throw new Exception("getValue called with no: " + no.ToString() + " while we have only " + objVal.Count.ToString() + " values");
-        }
-        public object getValue(int no, valueType valueType = valueType.UNDEFINED)
-        {
-            checkNo(no);
-
-            int indiceArray = (int)valueType;
-
-            switch (dType[no])
-            {
-                case valueDTP.INT:
-                    List<int?> valInt = (List<int?>) val;
-                    return valInt[no];
-                case valueDTP.DOUBLE:
-                    List<double?> valDbl = (List<double?>)val;
-                    return valDbl[no];
-                case valueDTP.STRING:
-                    List<string> valStr = (List<string>)val;
-                    return valStr[no];
-                case valueDTP.M3INT:
-                    if (valueType == global::loadData.valueType.UNDEFINED)
-                        throw new Exception("ValueAdd.getValue: cannot get array[UNDEFINED]");
-                    List<int[]> valIntArr = (List<int[]>)val;
-                    return valIntArr[no][indiceArray];
-                case valueDTP.M3DOUBLE:
-                    if (valueType == global::loadData.valueType.UNDEFINED)
-                        throw new Exception("ValueAdd.getValue: cannot get array[UNDEFINED]");
-                    List<double[]> valDblArr = (List<double[]>)val;
-                    return valDblArr[no][indiceArray];
-            }
-            throw new Exception("I should not be there in valueVal.getValue " + no.ToString() + ", " + dType[no].ToString());
-        }
-        void checkNbCol(int no)
-        {
-            List<object> objVal = (List<object>)val;
-            if (no > objVal.Count)
-                throw new Exception("value.checkNBCol trying to add " + (objVal.Count - no).ToString() + " new values, it is too much... (increase the number of measure in the inverter)");
-            while (objVal.Count <= no)
-            {
-                throw new Exception("data slot not created !!");
- //               objVal.Add(null);
-            }
-        }
-        void checkDataTP(int no, valueDTP valDTP)
-        {
-            if (dType[no] != valDTP)
-            {
-                throw new Exception("dataType do not correspond ! " + no.ToString() + ": " + valDTP.ToString() + ", dType: " + dType[no].ToString());
-            }
-        }
-        public void setValue(int no, int value)
-        {
-            checkNbCol(no);
-            checkDataTP(no, valueDTP.INT);
-
-            List<object> doubleVal = (List<object>)val;
-            if (doubleVal[no] != null)
-                throw new Exception("value.setValue pushing a second value in the slot! ");
-            doubleVal[no] = value;
-        }
-        public void setValue(int no, double value)
-        {
-            checkNbCol(no);
-            checkDataTP(no, valueDTP.DOUBLE);
-
-            List<object> doubleVal = (List<object>)val;
-            if (doubleVal[no] != null)
-                throw new Exception("value.setValue pushing a second value in the slot! ");
-            doubleVal[no] = value;
-        }
-        public void setValue(int no, string value)
-        {
-            checkNbCol(no);
-            checkDataTP(no, valueDTP.STRING);
-
-            List<object> doubleVal = (List<object>)val;
-            if (doubleVal[no] != null)
-                throw new Exception("value.setValue pushing a second value in the slot! ");
-            doubleVal[no] = value;
-        }
-        public void setValue(int no, int[] value)
-        {
-            checkNbCol(no);
-            checkDataTP(no, valueDTP.M3INT);
-
-            List<object> doubleVal = (List<object>)val;
-            if (doubleVal[no] != null)
-                throw new Exception("value.setValue pushing a second value in the slot! ");
-            doubleVal[no] = value;
-        }
-        public void setValue(int no, double[] value)
-        {
-            checkNbCol(no);
-            checkDataTP(no, valueDTP.M3DOUBLE);
-
-            List<object> doubleVal = (List<object>)val;
-            if (doubleVal[no] != null)
-                throw new Exception("value.setValue pushing a second value in the slot! ");
-            doubleVal[no] = value;
+            valObj[no] = value;
         }
     }
     /// <summary>
@@ -644,10 +518,6 @@ namespace loadData
             stringNames = new List<string>();
             vVals = new List<valueVal>();
         }
-        public Boolean isMeasureExist(String str, int no, valueDTP dataType)
-        {
-            return vVals[getStringNo(str)].isMeasureExist(no, dataType);
-        }
         int getStringNo(String str)
         {
             for (int i = 0; i < stringNames.Count(); i++)
@@ -662,36 +532,11 @@ namespace loadData
                 throw new Exception("stringVal.getStrinNo: internal inconsistency");
             return noStr;
         }
-        public void checkSlot( String str, int no, valueDTP valueDataType)
-        {
-            vVals[getStringNo(str)].checkSlot(no, valueDataType);
-        }
-        public int measureAdd(String str, valueDTP dtypeMeasure)
-        {
-            return vVals[getStringNo(str)].measureAdd(dtypeMeasure);
-        }
-
         public object getValue(string str, int no, valueType valueType = valueType.MEAN)
         {
-            return vVals[getStringNo(str)].getValue(no, valueType);
+            return vVals[getStringNo(str)].getValue(no);
         }
-        public void setValue(string str, int no, int value)
-        {
-            vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, int no, double value)
-        {
-            vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, int no, string value)
-        {
-            vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, int no, int[] value)
-        {
-            vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, int no, double[] value)
+        public void setValue(string str, int no, object value)
         {
             vVals[getStringNo(str)].setValue(no, value);
         }
@@ -709,11 +554,6 @@ namespace loadData
             aDates = new List<DateTime>();
             sVals = new List<stringVal>();
         }
-        public Boolean isMeasureExist(DateTime dt, String str, int no, valueDTP dataType)
-        {
-            return sVals[getDateNo(dt)].isMeasureExist(str, no, dataType);
-        }
-
         int getDateNo(DateTime dt)
         {
             for (int i = 0; i < aDates.Count(); i++)
@@ -725,35 +565,11 @@ namespace loadData
             sVals.Add(new stringVal());
             return getDateNo(dt);
         }
-        public void checkSlot(DateTime dt, String str, int no, valueDTP valueDataType){
-            sVals[getDateNo(dt)].checkSlot(str, no, valueDataType);
-        }
-
-        public int measureAdd(DateTime dt, String str, valueDTP dtypeMeasure)
+        public object getValue(DateTime dt, string str, int no)
         {
-            return sVals[getDateNo(dt)].measureAdd(str, dtypeMeasure);
+            return sVals[getDateNo(dt)].getValue(str, no);
         }
-        public object getValue(DateTime dt, string str, int no, valueType valueType = valueType.MEAN)
-        {
-            return sVals[getDateNo(dt)].getValue(str, no, valueType);
-        }
-        public void setValue(DateTime dt, string str, int no, int value)
-        {
-            sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, int no, double value)
-        {
-            sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, int no, string value)
-        {
-            sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, int no, int[] value)
-        {
-            sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, int no, double[] value)
+        public void setValue(DateTime dt, string str, int no, object value)
         {
             sVals[getDateNo(dt)].setValue(str, no, value);
         }
@@ -770,7 +586,8 @@ namespace loadData
         public String model;
         public String serialNo;
         public long power;
-        public Dictionary<String, int> measureInternalNameArray;
+        public List<valueDTP> dataTP;
+        public Dictionary<String, int> measureInternalNameArray;        // internal, colNber
         public dateVal values;        // dateVal, StringVal, ValueVal
         public invType type;
         public int nbStrings;
@@ -786,6 +603,7 @@ namespace loadData
             this.model = model;
             this.serialNo = serialNo;
             this.type = type;
+            this.dataTP = new List<valueDTP>();
             this.measureInternalNameArray = new Dictionary<string, int>();     // internalNames
             if (power == 0)
             {
@@ -806,34 +624,34 @@ namespace loadData
         }
         int getColNo(DateTime mDate, String measureName, String str)
         {
-            int colNo;
-
             string internalName = glob.getInternalName(measureName);
 
             // check in the measure is mapped
             if (glob.allMNames.ContainsKey(measureName))
                 internalName = glob.allMNames[measureName];
 
+            // do we already encountered this measure ?
+            if(measureInternalNameArray.ContainsKey(internalName)){
+                return measureInternalNameArray[internalName];
+            }
+
             // we need to add a new value slot for our new measure
             measureDef mDef = glob.allM[internalName];
             if (mDef == null)
                 throw new Exception("measure: " + measureName + "(internal: " + internalName + ") not found in glob.allM");
-
-            // do we already encountered this measure ?
-            if(measureInternalNameArray.ContainsKey(internalName)){
-                this.values.checkSlot(mDate, str, measureInternalNameArray[internalName], mDef.valueDataType);
-                return measureInternalNameArray[internalName];
-            }
 
             if(! glob.allM.ContainsKey(internalName)){
                 // no matching mesure found in our catalog !!!
                 throw new Exception ("inverter.getColNo: measure: " + measureName + "(" + internalName + ") not found in allMNames neither allM");
             }
 
-            colNo =  this.values.measureAdd(mDate, str, mDef.valueDataType);
-            measureInternalNameArray.Add(internalName, colNo);
+            this.dataTP.Add(mDef.valueDataType);
+            measureInternalNameArray.Add(internalName, this.dataTP.Count-1);
 
-            return colNo;
+            if (this.measureInternalNameArray.Count != this.dataTP.Count)
+                throw new Exception("Inverter: inconsitency between dataTP and measureInternal: " + dataTP.Count.ToString() + ", " + measureInternalNameArray.Count.ToString());
+
+            return this.dataTP.Count -1;
         }
         public object getValue(DateTime dt, string str, string measureName, valueType valueType = valueType.MEAN)
         {
@@ -841,7 +659,22 @@ namespace loadData
         }
         public object getValue(DateTime dt, string str, int no, valueType valueType = valueType.MEAN)
         {
-            return values.getValue(dt, str, no, valueType);
+            if (no > dataTP.Count - 1)
+                throw new Exception("inverter.getValue: invalid index");
+
+            object valObj = values.getValue(dt, str, no);
+            
+            switch (dataTP[no])
+            {
+                case valueDTP.INT:
+                case valueDTP.DOUBLE:
+                case valueDTP.STRING:
+                    return valObj;
+                default:
+                    List<object> valObjs = (List<object>)valObj;
+                    return (object) valObjs [(int) valueType];
+            }
+            throw new Exception ("inverter.getValue: why am I here ??");
         }
         public void setValue(DateTime dt, string str, string measureName, int value)
         {
