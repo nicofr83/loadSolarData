@@ -18,6 +18,7 @@ namespace loadData
         static public Dictionary<String, measureDef> allM = new Dictionary<string, measureDef>();
         static public Dictionary<String, string> allMNames = new Dictionary<string, string>();
         static public ListBox lbResult;
+        static public int MAX_VALUES = 30;
 
         private static glob _me = new glob();
 
@@ -27,11 +28,85 @@ namespace loadData
         {
             return _me;
         }
+        // utilities
+        // 0 : root name
+        // 1 : suffix 1
+        // 2 : suffix 2
+        // 3 : String
+        // 4 : Original Name
+        public static string[] decodeName(String mName)
+        {
+            String[] strName = new String[5];
+            String[] tmpStr = mName.Split(new char[] { '.' });
+
+            strName[4] = mName;
+            strName[0] = tmpStr[0];
+            if (tmpStr.Count() > 3)
+                throw new Exception(mName + " has more than 2 dots !!!");
+            if (tmpStr.Count() > 1)
+                strName[1] = tmpStr[1];
+            if (tmpStr.Count() > 2)
+                strName[2] = tmpStr[2];
+            int indToCheck = 1;
+            if (strName[1] == null)
+                indToCheck = 0;
+            if (strName[indToCheck].IndexOf('[') > 0)
+            {
+                strName[3] = strName[indToCheck].Substring(strName[indToCheck].IndexOf('[') + 1, strName[indToCheck].IndexOf(']') - strName[indToCheck].IndexOf('[') - 1);
+                strName[indToCheck] = strName[indToCheck].Substring(0, strName[indToCheck].IndexOf('['));
+            }
+            else
+                strName[3] = "";
+            if (strName[1] != null)
+            {
+                if (strName[1].ToLower().StartsWith("flt"))
+                {
+                    strName[3] = strName[1].Substring(3, 1);
+                    strName[1] = strName[1].Substring(0, 3);
+                }
+            }
+            if (strName[2] != null)
+            {
+                switch (strName[2].ToLower())
+                {
+                    case "phsa":
+                        strName[3] = "Phase 1";
+                        strName[2] = null;
+                        break;
+                    case "phsb":
+                        strName[3] = "Phase 2";
+                        strName[2] = null;
+                        break;
+                    case "phsc":
+                        strName[3] = "Phase 3";
+                        strName[2] = null;
+                        break;
+                    default:
+                        if (strName[2].ToLower().StartsWith("phs"))
+                            throw new Exception(mName + " has a phs suffice not reconized !!!");
+                        break;
+                }
+            }
+            return strName;
+        }
+        public static string getInternalName(String MeasureName)
+        {
+            string[] decodName = glob.decodeName(MeasureName);
+            return glob.buildInternalName(decodName);
+        }
+        public static string buildInternalName(string[] dcdName){
+            String strTmp = dcdName[0];
+            if(dcdName[1] != null && dcdName[1].Length > 0)
+                strTmp += "-" + dcdName[1];
+            if(dcdName[2] != null && dcdName[2].Length > 0)
+                strTmp += "-" + dcdName[2];
+            return strTmp;
+        }
     }
     class loadData
     {
         private int MAX_VALUES_PER_LINE = 150;
-        private int MAX_VALUES;
+        private int MAX_VALUES = glob.MAX_VALUES;
         private const int MAX_STRING = 10;
         dbserver dbs;
         private Boolean[] bFlushMaster;
@@ -44,7 +119,6 @@ namespace loadData
             if (strPath == null || strPath.Length == 0)
                 return;
             glob.lbResult = lb;
-            MAX_VALUES = glob.allM.Count + 2;        // 2 for generated, perf ratio 
 
             // load and check measure information integrity
             loadAndCheckMeasureNames();
@@ -56,7 +130,7 @@ namespace loadData
             {
                 Directory.SetCurrentDirectory(oneDir);
                 String[] pathDetail = oneDir.Split(new char[] { '\\' });
-                runForThisSite(pathDetail[pathDetail.Count()-1], fileType);
+                runForThisSite(pathDetail[pathDetail.Count() - 1], fileType);
             }
             Directory.SetCurrentDirectory(strPath);
         }
@@ -66,7 +140,7 @@ namespace loadData
             dbs = new dbserver(siteName);
             loadAndCheckInverters(siteName);
 
-            String[] allFileNames = Directory.GetFiles(".", "*." + ((fileType=="xml")?"zip":fileType), SearchOption.AllDirectories);
+            String[] allFileNames = Directory.GetFiles(".", "*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
 
             switch (fileType.ToLower())
             {
@@ -104,7 +178,7 @@ namespace loadData
 
                     break;
             }
-           
+
             //dbs.checkInverters(siteName, glob.allM);
             //dbs.checkDateTimeLine(glob.allM);
 
@@ -125,26 +199,28 @@ namespace loadData
         {
             string[] strInfo;
             DateTime dtMeasure;
-            double meanVal;
             String strUnit;
             int measurePeriod;
             String[] measureNamesSplitted;
+            inverter inv;
+            String internalName;
+            measureDef mDef;
 
             try
             {
-                switch (xnd.Name){
+                switch (xnd.Name)
+                {
                     case "Info":
 
                         return;
                     case "CurrentPublic":
                     case "MeanPublic":
                         strInfo = getNodeInfo(xnd);
-                        measureNamesSplitted = decodeName(strInfo[2]);
+                        measureNamesSplitted = glob.decodeName(strInfo[2]);
                         dtMeasure = getNodeDate(xnd);
-                        strUnit = getNodeValue(xnd, "Unit");
+                        strUnit = getNodeValueString(xnd, "Unit");
                         measurePeriod = getNodeValInt(xnd, "Period");
-                        meanVal = getNodeValDouble(xnd, "Mean");
-                        inverter inv;
+
                         if (!glob.inverters.ContainsKey(strInfo[1]))
                         {
                             inv = new inverter(siteName, strInfo[0], "???", strInfo[1]);
@@ -152,24 +228,49 @@ namespace loadData
                         }
                         else
                             inv = glob.inverters[strInfo[1]];
-
-                        if (xnd.Name == "CurrentMean")
+                        internalName = glob.allMNames[strInfo[2]];
+                        if (internalName == null)
+                            internalName = glob.buildInternalName(measureNamesSplitted);
+                        if (!glob.allM.ContainsKey(internalName))
                         {
-                            double[] valDoubleArray = new Double[3];
-                            valDoubleArray[0] = meanVal;
-                            valDoubleArray[1] = getNodeValDouble(xnd, "Min");
-                            valDoubleArray[2] = getNodeValDouble(xnd, "Max");
-
-                            inv.values.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], valDoubleArray);
+                            MessageBox.Show ("No measure definition for " + strInfo[2] + "("+internalName+")");
+                            return;
                         }
-                        else
+                        mDef = glob.allM[internalName];
+                        switch (mDef.valueDataType)
                         {
-                            inv.values.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], meanVal);
+                            case valueDTP.INT:
+                                inv.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], getNodeValInt(xnd, "Mean"));
+                                break;
+                            case valueDTP.DOUBLE:
+                                inv.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], getNodeValDouble(xnd, "Mean"));
+                                break;
+                            case valueDTP.STRING:
+                                inv.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], getNodeValueString(xnd, "Mean"));
+                                break;
+                            case valueDTP.M3INT:
+                                int[] valIntArray = new int[3];
+                                valIntArray[0] = getNodeValInt(xnd, "Mean");
+                                valIntArray[1] = getNodeValInt(xnd, "Min");
+                                valIntArray[2] = getNodeValInt(xnd, "Max");
+
+                                inv.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], valIntArray);
+
+                                break;
+                            case valueDTP.M3DOUBLE:
+                                double[] valDoubleArray = new Double[3];
+                                valDoubleArray[0] = getNodeValDouble(xnd, "Mean");
+                                valDoubleArray[1] = getNodeValDouble(xnd, "Min");
+                                valDoubleArray[2] = getNodeValDouble(xnd, "Max");
+
+                                inv.setValue(dtMeasure, measureNamesSplitted[3], strInfo[2], valDoubleArray);
+
+                                break;
                         }
 
                         break;
                     default:
-                        MessageBox.Show("Site: " + siteName + ", Name of node unknown: " + xnd.Name + ": " + xnd.InnerText );
+                        MessageBox.Show("Site: " + siteName + ", Name of node unknown: " + xnd.Name + ": " + xnd.InnerText);
                         break;
                 }
             }
@@ -181,7 +282,7 @@ namespace loadData
         int getNodeValInt(XmlNode xnd, String key)
         {
             int ii = 0;
-            string strTmp = getNodeValue(xnd, key);
+            string strTmp = getNodeValueString(xnd, key);
             if (strTmp == null || strTmp.Length == 0 || int.TryParse(strTmp, out ii))
                 return ii;
 
@@ -190,7 +291,7 @@ namespace loadData
         double getNodeValDouble(XmlNode xnd, String key)
         {
             double ii = 0;
-            string strTmp = getNodeValue(xnd, key).Replace(".",",");
+            string strTmp = getNodeValueString(xnd, key).Replace(".", ",");
             if (strTmp == null || strTmp.Length == 0 || Double.TryParse(strTmp, out ii))
                 return ii;
 
@@ -200,7 +301,7 @@ namespace loadData
         {
             DateTime dt;
 
-            String strTmp = getNodeValue(xnd, "Timestamp");
+            String strTmp = getNodeValueString(xnd, "Timestamp");
             if (DateTime.TryParse(strTmp, out dt))
                 return dt;
 
@@ -211,22 +312,22 @@ namespace loadData
         {
             String[] strRet;
 
-            String tmpStr = getNodeValue(xnd, "Key");
+            String tmpStr = getNodeValueString(xnd, "Key");
             strRet = tmpStr.Split(new char[] { ':' });
             if (strRet.Count() == 4)
             {
                 String[] tmpStrArr = new String[3];
                 tmpStrArr[0] = strRet[0] + ":" + strRet[1];
-                tmpStrArr[1] = strRet[1];
-                tmpStrArr[2] = strRet[2];
+                tmpStrArr[1] = strRet[2];
+                tmpStrArr[2] = strRet[3];
                 strRet = tmpStrArr;
             }
             if (strRet.Count() != 3)
                 throw new Exception("invalid node information: " + xnd.OuterXml);
-            
+
             return strRet;
         }
-        String getNodeValue(XmlNode xnd, String key)
+        String getNodeValueString(XmlNode xnd, String key)
         {
             string strVal = "";
             foreach (XmlNode xx in xnd.ChildNodes)
@@ -298,7 +399,7 @@ namespace loadData
             List<measureDef> measuresDef = new List<measureDef>()
             {
                 new measureDef ("emptySolt", "NeverComeHere", "??", "", 0, "?", false, valueDTP.STRING),
-                new measureDef ("dc_Current", "DcMs", "Amp", "", 1, "A", true, valueDTP.M3DOUBLE),
+                new measureDef ("dc_Current", "DcMs", "Amp", "", 1, "A", true, valueDTP.DOUBLE),
                 new measureDef ("dc_Voltage","DcMs", "Vol", "", 2, "V", true, valueDTP.M3DOUBLE),
                 new measureDef ("dc_Power", "DcMs", "Watt", "", 3, "W", true, valueDTP.M3DOUBLE),
                 new measureDef ("environmentTemp", "Env", "TmpVal", "", 4, "C", true, valueDTP.M3DOUBLE),
@@ -309,8 +410,8 @@ namespace loadData
                 new measureDef ("voltage", "GridMs", "PhV", "", 9, "V", true, valueDTP.M3DOUBLE),
                 new measureDef ("activePower", "GridMs", "TotW", "", 10, "W", true, valueDTP.M3DOUBLE),
                 new measureDef ("mod_Temp", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE),
-                new measureDef ("time_FeedIn", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.INT),
-                new measureDef ("time_Operating", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.INT),
+                new measureDef ("time_FeedIn", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.DOUBLE),
+                new measureDef ("time_Operating", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.DOUBLE),
                 new measureDef ("Out_EnergyDaily", "Metering", "TotWhOut", "", 14, "W", true, valueDTP.DOUBLE),
                 new measureDef ("evt_Description", "Operation", "Evt", "Dsc", 15, "String", false, valueDTP.STRING),
                 new measureDef ("evt_No", "Operation", "Evt", "No", 16, "String", true, valueDTP.STRING),
@@ -332,8 +433,7 @@ namespace loadData
                 string intName = null;
                 if (redirectNames[strRedir] != -1)
                 {
-                    string[] decodName = decodeName(strRedir);
-                    intName = decodName[0] + "-" + ((decodName[1] == null) ? "" : decodName[1]) + "-" + ((decodName[2] == null) ? "" : decodName[2]);
+                    intName = glob.getInternalName(strRedir);
 
                     if (!glob.allM.ContainsKey(intName))
                     {
@@ -343,159 +443,88 @@ namespace loadData
                 glob.allMNames.Add(strRedir, intName);
             }
         }
-        void check
         public void loadAndCheckInverters(String siteName)
         {
             glob.inverters = dbs.loadInverters(siteName);
         }
-
-        // utilities
-        // 0 : root name
-        // 1 : suffix 1
-        // 2 : suffix 2
-        // 3 : String
-        // 4 : Original Name
-        string[] decodeName(String mName)
-        {
-            String[] strName = new String[5];
-            String[] tmpStr = mName.Split(new char[] { '.' });
-
-            strName[4] = mName;
-            strName[0] = tmpStr[0];
-            if (tmpStr.Count() > 3)
-                throw new Exception(mName + " has more than 2 dots !!!");
-            if (tmpStr.Count() > 1)
-                strName[1] = tmpStr[1];
-            if (tmpStr.Count() > 2)
-                strName[2] = tmpStr[2];
-            int indToCheck = 1;
-            if (strName[1] == null)
-                indToCheck = 0;
-            if (strName[indToCheck].IndexOf('[') > 0)
-            {
-                strName[3] = strName[indToCheck].Substring(strName[indToCheck].IndexOf('[') + 1, strName[indToCheck].IndexOf(']') - strName[indToCheck].IndexOf('[') - 1);
-                strName[indToCheck] = strName[indToCheck].Substring(0, strName[indToCheck].IndexOf('['));
-            }
-            else
-                strName[3] = "";
-            if (strName[1] != null)
-            {
-                if (strName[1].ToLower().StartsWith("flt"))
-                {
-                    strName[3] = strName[1].Substring(3, 1);
-                    strName[1] = strName[1].Substring(0, 3);
-                }
-            }
-            if (strName[2] != null)
-            {
-                switch (strName[2].ToLower())
-                {
-                    case "phsa":
-                        strName[3] = "Phase 1";
-                        strName[2] = null;
-                        break;
-                    case "phsb":
-                        strName[3] = "Phase 2";
-                        strName[2] = null;
-                        break;
-                    case "phsc":
-                        strName[3] = "Phase 3";
-                        strName[2] = null;
-                        break;
-                    default:
-                        if (strName[2].ToLower().StartsWith("phs"))
-                            throw new Exception(mName + " has a phs suffice not reconized !!!");
-                        break;
-                }
-            }
-            return strName;
-        }
     }
-
-    public class measureDef
-    {
-        public string name;
-        public string internalName;
-        public string[] nameDecoded; // 0 root, 1 suffix1, 2 suffix2
-        public int id;
-        public string unit;
-        public bool bFlushDBRow;
-        public valueDTP valueDataType;
-
-        public measureDef(string name, string root, string suffix1, string suffix2, int id, string unit, bool bFlushDBRow, valueDTP valueDataType)
+        public class measureDef
         {
+            public string name;
+            public string internalName;
+            public string[] nameDecoded; // 0 root, 1 suffix1, 2 suffix2
+            public int id;
+            public string unit;
+            public bool bFlushDBRow;
+            public valueDTP valueDataType;
 
-            this.name = name;
-            this.nameDecoded = new string[3];
-            this.nameDecoded[0] = root;
-            this.nameDecoded[1] = suffix1;
-            this.nameDecoded[2] = suffix2;
-            this.internalName = root + "-" + ((suffix1 == null) ? "" : suffix1) + "-" + ((suffix2 == null) ? "" : suffix2);
-            this.id = id;
-            this.unit = unit;
-            this.bFlushDBRow = bFlushDBRow;
-            this.valueDataType = valueDataType;
+            public measureDef(string name, string root, string suffix1, string suffix2, int id, string unit, bool bFlushDBRow, valueDTP valueDataType)
+            {
+
+                this.name = name;
+                this.nameDecoded = new string[3];
+                this.nameDecoded[0] = root;
+                this.nameDecoded[1] = suffix1;
+                this.nameDecoded[2] = suffix2;
+                this.internalName = glob.buildInternalName(this.nameDecoded);
+                this.id = id;
+                this.unit = unit;
+                this.bFlushDBRow = bFlushDBRow;
+                this.valueDataType = valueDataType;
+            }
         }
-    }
+
     /// <summary>
     ///     VALUEADD
     /// </summary>
     public enum valueDTP { INT = 1, DOUBLE = 2, STRING = 3, M3INT = 10, M3DOUBLE = 11 };
     public class valueVal
     {
+        // indice = colNo defined in inverter
         List<valueDTP> dType;
         public object val;
 
-        public valueVal(int nbValues = 30)
+        public valueVal()
         {
-            dType = new List<valueDTP>();
-            val = null;
+            dType = new List<valueDTP>(glob.MAX_VALUES);
+            val = (object) new List<object>(glob.MAX_VALUES);
         }
-        public int measureAdd(String measureName, int nbValues = 30)
+        public Boolean isMeasureExist(int no, valueDTP dataType)
         {
-            int mDefNo = -1;
+            List<object> valObj = (List<object>)val;
+            if (no >= valObj.Count)
+                return false;
+            if ( dType[no] != dataType)
+                throw new Exception("bad data value type");
 
-            if (!glob.allMNames.ContainsKey(measureName))
-            {
-                throw new Exception("measure name: " + measureName + " not found in glob.allM");
-            }
-            if (glob.allMNames[measureName] == null)
-            {
-                throw new Exception("trying to add a measure name: " + measureName + " not saved in our database (allMNames.val = -1)");
-            }
-            measureDef mDef = glob.allM[glob.allMNames[measureName]];
+            return true;
+        }
+        public void checkSlot(int no, valueDTP valueDataType)
+        {
+            if (no < dType.Count)
+                return;
+            if (no != dType.Count)
+                throw new Exception("creation of multiple slots... ???");
 
-            dType.Add(mDef.valueDataType);
-            mDefNo = dType.Count() - 1;
+            dType.Add(valueDataType);
+            List<object> valObj = (List<object>)val;
+            valObj.Add(null);
 
-            if (val == null)
-            {
-                switch (mDef.valueDataType)
-                {
-                    case valueDTP.INT:
-                        val = new List<int?>();
-                        break;
-                    case valueDTP.DOUBLE:
-                        val = (object)new List<double?>();
-                        break;
-                    case valueDTP.STRING:
-                        val = (object)new List<String>();
-                        break;
-                    case valueDTP.M3INT:
-                        val = (object)new List<List<int?>>();
-                        break;
-                    case valueDTP.M3DOUBLE:
-                        val = (object)new List<List<double?>>();
-                        break;
-                }
-            }
-            List<object> objVal = (List<object>)val;
-            objVal.Add(null);
-
-            if (mDefNo != objVal.Count())
+            if (dType.Count != valObj.Count())
                 throw new Exception("measureAdd: internal inconsistency");
+        }
 
-            return mDefNo;
+        public int measureAdd(valueDTP dtypeMeasure)
+        {
+            // Add value
+            dType.Add(dtypeMeasure);
+            // add value
+            List<object> valObj = (List<object>)val;
+            valObj.Add(null);
+
+            if (dType.Count != valObj.Count())
+                throw new Exception("measureAdd: internal inconsistency");
+            return dType.Count-1;
         }
         void checkNo(int no)
         {
@@ -503,22 +532,7 @@ namespace loadData
             if (no >= objVal.Count)
                 throw new Exception("getValue called with no: " + no.ToString() + " while we have only " + objVal.Count.ToString() + " values");
         }
-        private int getColNo(string measureName)
-        {
-            if (!glob.allMNames.ContainsKey(measureName))
-            {
-                string[] dcdName = decodedNam(measureName);
-
-                measureAdd(measureName);
-            }
-            return glob.allM[measureName].id;
-        }
-
-        public object getValue(string measureName, valueType valueType = valueType.MEAN)
-        {
-            return getValue(getColNo(measureName), valueType);
-        }
-        public object getValue(int no, valueType valueType = valueType.MEAN)
+        public object getValue(int no, valueType valueType = valueType.UNDEFINED)
         {
             checkNo(no);
 
@@ -527,7 +541,7 @@ namespace loadData
             switch (dType[no])
             {
                 case valueDTP.INT:
-                    List<int?> valInt = (List<int?>)val;
+                    List<int?> valInt = (List<int?>) val;
                     return valInt[no];
                 case valueDTP.DOUBLE:
                     List<double?> valDbl = (List<double?>)val;
@@ -536,9 +550,13 @@ namespace loadData
                     List<string> valStr = (List<string>)val;
                     return valStr[no];
                 case valueDTP.M3INT:
+                    if (valueType == global::loadData.valueType.UNDEFINED)
+                        throw new Exception("ValueAdd.getValue: cannot get array[UNDEFINED]");
                     List<int[]> valIntArr = (List<int[]>)val;
                     return valIntArr[no][indiceArray];
                 case valueDTP.M3DOUBLE:
+                    if (valueType == global::loadData.valueType.UNDEFINED)
+                        throw new Exception("ValueAdd.getValue: cannot get array[UNDEFINED]");
                     List<double[]> valDblArr = (List<double[]>)val;
                     return valDblArr[no][indiceArray];
             }
@@ -547,11 +565,12 @@ namespace loadData
         void checkNbCol(int no)
         {
             List<object> objVal = (List<object>)val;
-            if (no + 20 > objVal.Count)
+            if (no > objVal.Count)
                 throw new Exception("value.checkNBCol trying to add " + (objVal.Count - no).ToString() + " new values, it is too much... (increase the number of measure in the inverter)");
             while (objVal.Count <= no)
             {
-                objVal.Add(null);
+                throw new Exception("data slot not created !!");
+ //               objVal.Add(null);
             }
         }
         void checkDataTP(int no, valueDTP valDTP)
@@ -561,72 +580,52 @@ namespace loadData
                 throw new Exception("dataType do not correspond ! " + no.ToString() + ": " + valDTP.ToString() + ", dType: " + dType[no].ToString());
             }
         }
-        public void setValue(string measureName, int value)
-        {
-            setValue(getColNo(measureName), value);
-        }
         public void setValue(int no, int value)
         {
             checkNbCol(no);
             checkDataTP(no, valueDTP.INT);
 
-            List<int?> intVal = (List<int?>)val;
-            if (intVal[no] != null)
+            List<object> doubleVal = (List<object>)val;
+            if (doubleVal[no] != null)
                 throw new Exception("value.setValue pushing a second value in the slot! ");
-            intVal[no] = value;
-        }
-        public void setValue(string measureName, double value)
-        {
-            setValue(getColNo(measureName), value);
+            doubleVal[no] = value;
         }
         public void setValue(int no, double value)
         {
             checkNbCol(no);
             checkDataTP(no, valueDTP.DOUBLE);
 
-            List<double?> doubleVal = (List<double?>)val;
+            List<object> doubleVal = (List<object>)val;
             if (doubleVal[no] != null)
                 throw new Exception("value.setValue pushing a second value in the slot! ");
             doubleVal[no] = value;
-        }
-        public void setValue(string measureName, string value)
-        {
-            setValue(getColNo(measureName), value);
         }
         public void setValue(int no, string value)
         {
             checkNbCol(no);
             checkDataTP(no, valueDTP.STRING);
 
-            List<string> stringVal = (List<string>)val;
-            if (stringVal[no] != null)
+            List<object> doubleVal = (List<object>)val;
+            if (doubleVal[no] != null)
                 throw new Exception("value.setValue pushing a second value in the slot! ");
-            stringVal[no] = value;
-        }
-        public void setValue(string measureName, int[] value)
-        {
-            setValue(getColNo(measureName), value);
+            doubleVal[no] = value;
         }
         public void setValue(int no, int[] value)
         {
             checkNbCol(no);
             checkDataTP(no, valueDTP.M3INT);
 
-            List<int[]> intVal = (List<int[]>)val;
-            if (intVal[no] != null)
+            List<object> doubleVal = (List<object>)val;
+            if (doubleVal[no] != null)
                 throw new Exception("value.setValue pushing a second value in the slot! ");
-            intVal[no] = value;
-        }
-        public void setValue(string measureName, double[] value)
-        {
-            setValue(getColNo(measureName), value);
+            doubleVal[no] = value;
         }
         public void setValue(int no, double[] value)
         {
             checkNbCol(no);
             checkDataTP(no, valueDTP.M3DOUBLE);
 
-            List<double[]> doubleVal = (List<double[]>)val;
+            List<object> doubleVal = (List<object>)val;
             if (doubleVal[no] != null)
                 throw new Exception("value.setValue pushing a second value in the slot! ");
             doubleVal[no] = value;
@@ -637,69 +636,60 @@ namespace loadData
     /// </summary>
     public class stringVal
     {
-        List<string> stringName;
+        List<string> stringNames;
         List<valueVal> vVals;
 
         public stringVal()
         {
-            stringName = new List<string>();
+            stringNames = new List<string>();
             vVals = new List<valueVal>();
+        }
+        public Boolean isMeasureExist(String str, int no, valueDTP dataType)
+        {
+            return vVals[getStringNo(str)].isMeasureExist(no, dataType);
         }
         int getStringNo(String str)
         {
-            for (int i = 0; i < stringName.Count(); i++)
+            for (int i = 0; i < stringNames.Count(); i++)
             {
-                if (this.stringName[i] == str)
+                if (this.stringNames[i] == str)
                     return i;
             }
-            this.stringName.Add(str);
-            vVals.Add(new valueVal(30));
-            return getStringNo(str);
+            this.stringNames.Add(str);
+            int noStr = getStringNo(str);
+            vVals.Add(new valueVal());
+            if (vVals.Count != stringNames.Count)
+                throw new Exception("stringVal.getStrinNo: internal inconsistency");
+            return noStr;
+        }
+        public void checkSlot( String str, int no, valueDTP valueDataType)
+        {
+            vVals[getStringNo(str)].checkSlot(no, valueDataType);
+        }
+        public int measureAdd(String str, valueDTP dtypeMeasure)
+        {
+            return vVals[getStringNo(str)].measureAdd(dtypeMeasure);
         }
 
-        public object getValue(string str, string measureName, valueType valueType = valueType.MEAN)
-        {
-            return vVals[getStringNo(str)].getValue(measureName, valueType);
-        }
         public object getValue(string str, int no, valueType valueType = valueType.MEAN)
         {
             return vVals[getStringNo(str)].getValue(no, valueType);
-        }
-        public void setValue(string str, string measureName, int value)
-        {
-            vVals[getStringNo(str)].setValue(measureName, value);
         }
         public void setValue(string str, int no, int value)
         {
             vVals[getStringNo(str)].setValue(no, value);
         }
-        public void setValue(string str, string measureName, double value)
-        {
-            vVals[getStringNo(str)].setValue(measureName, value);
-        }
         public void setValue(string str, int no, double value)
         {
             vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, string measureName, string value)
-        {
-            vVals[getStringNo(str)].setValue(measureName, value);
         }
         public void setValue(string str, int no, string value)
         {
             vVals[getStringNo(str)].setValue(no, value);
         }
-        public void setValue(string str, string measureName, int[] value)
-        {
-            vVals[getStringNo(str)].setValue(measureName, value);
-        }
         public void setValue(string str, int no, int[] value)
         {
             vVals[getStringNo(str)].setValue(no, value);
-        }
-        public void setValue(string str, string measureName, double[] value)
-        {
-            vVals[getStringNo(str)].setValue(measureName, value);
         }
         public void setValue(string str, int no, double[] value)
         {
@@ -719,6 +709,11 @@ namespace loadData
             aDates = new List<DateTime>();
             sVals = new List<stringVal>();
         }
+        public Boolean isMeasureExist(DateTime dt, String str, int no, valueDTP dataType)
+        {
+            return sVals[getDateNo(dt)].isMeasureExist(str, no, dataType);
+        }
+
         int getDateNo(DateTime dt)
         {
             for (int i = 0; i < aDates.Count(); i++)
@@ -730,50 +725,33 @@ namespace loadData
             sVals.Add(new stringVal());
             return getDateNo(dt);
         }
+        public void checkSlot(DateTime dt, String str, int no, valueDTP valueDataType){
+            sVals[getDateNo(dt)].checkSlot(str, no, valueDataType);
+        }
 
-        public object getValue(DateTime dt, string str, string measureName, valueType valueType = valueType.MEAN)
+        public int measureAdd(DateTime dt, String str, valueDTP dtypeMeasure)
         {
-            return sVals[getDateNo(dt)].getValue(str, measureName, valueType);
+            return sVals[getDateNo(dt)].measureAdd(str, dtypeMeasure);
         }
         public object getValue(DateTime dt, string str, int no, valueType valueType = valueType.MEAN)
         {
             return sVals[getDateNo(dt)].getValue(str, no, valueType);
         }
-        public void setValue(DateTime dt, string str, string measureName, int value)
-        {
-            sVals[getDateNo(dt)].setValue(str, measureName, value);
-        }
         public void setValue(DateTime dt, string str, int no, int value)
         {
             sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, string measureName, double value)
-        {
-            sVals[getDateNo(dt)].setValue(str, measureName, value);
         }
         public void setValue(DateTime dt, string str, int no, double value)
         {
             sVals[getDateNo(dt)].setValue(str, no, value);
         }
-        public void setValue(DateTime dt, string str, string measureName, string value)
-        {
-            sVals[getDateNo(dt)].setValue(str, measureName, value);
-        }
         public void setValue(DateTime dt, string str, int no, string value)
         {
             sVals[getDateNo(dt)].setValue(str, no, value);
         }
-        public void setValue(DateTime dt, string str, string measureName, int[] value)
-        {
-            sVals[getDateNo(dt)].setValue(str, measureName, value);
-        }
         public void setValue(DateTime dt, string str, int no, int[] value)
         {
             sVals[getDateNo(dt)].setValue(str, no, value);
-        }
-        public void setValue(DateTime dt, string str, string measureName, double[] value)
-        {
-            sVals[getDateNo(dt)].setValue(str, measureName, value);
         }
         public void setValue(DateTime dt, string str, int no, double[] value)
         {
@@ -784,7 +762,7 @@ namespace loadData
     /// INVERTER
     /// </summary>
     public enum invType { WEBBOX = 1, SENSOR = 2, INVERTER = 3 };
-    public enum valueType { MEAN = 0, MIN = 1, MAX = 2 };
+    public enum valueType { MEAN = 0, MIN = 1, MAX = 2, UNDEFINED=99 };
     public class inverter
     {
         public String name;
@@ -792,21 +770,23 @@ namespace loadData
         public String model;
         public String serialNo;
         public long power;
-        public Dictionary<String, List<int>> measureName;       // name from measureDef, 0:Mean, 1:Min, 2:Max
-        public dateVal values;        // dateTime, measureName, 0=Mean [1 = Min, 2 = Max]
+        public Dictionary<String, int> measureInternalNameArray;
+        public dateVal values;        // dateVal, StringVal, ValueVal
         public invType type;
         public int nbStrings;
         public int nbMeasures;
         public String sensorSN;
 
         public inverter(String company, String name, String model, String serialNo, long power = 0, invType type = invType.INVERTER,
-                        int nbMeasures = 30, int nbStrings = 20, String sensorSN = null)
+                        int nbMeasures = -1, int nbStrings = 20, String sensorSN = null)
         {
+            if (nbMeasures == -1)
+                nbMeasures = glob.MAX_VALUES;
             this.name = name;
             this.model = model;
             this.serialNo = serialNo;
             this.type = type;
-            this.measureName = new Dictionary<string, List<int>>();
+            this.measureInternalNameArray = new Dictionary<string, int>();     // internalNames
             if (power == 0)
             {
                 string output = new string(model.Where(c => char.IsDigit(c)).ToArray());
@@ -824,9 +804,40 @@ namespace loadData
                     this.type = invType.SENSOR;
             this.values = new dateVal();
         }
+        int getColNo(DateTime mDate, String measureName, String str)
+        {
+            int colNo;
+
+            string internalName = glob.getInternalName(measureName);
+
+            // check in the measure is mapped
+            if (glob.allMNames.ContainsKey(measureName))
+                internalName = glob.allMNames[measureName];
+
+            // we need to add a new value slot for our new measure
+            measureDef mDef = glob.allM[internalName];
+            if (mDef == null)
+                throw new Exception("measure: " + measureName + "(internal: " + internalName + ") not found in glob.allM");
+
+            // do we already encountered this measure ?
+            if(measureInternalNameArray.ContainsKey(internalName)){
+                this.values.checkSlot(mDate, str, measureInternalNameArray[internalName], mDef.valueDataType);
+                return measureInternalNameArray[internalName];
+            }
+
+            if(! glob.allM.ContainsKey(internalName)){
+                // no matching mesure found in our catalog !!!
+                throw new Exception ("inverter.getColNo: measure: " + measureName + "(" + internalName + ") not found in allMNames neither allM");
+            }
+
+            colNo =  this.values.measureAdd(mDate, str, mDef.valueDataType);
+            measureInternalNameArray.Add(internalName, colNo);
+
+            return colNo;
+        }
         public object getValue(DateTime dt, string str, string measureName, valueType valueType = valueType.MEAN)
         {
-            return values.getValue(dt, str, measureName, valueType);
+            return getValue(dt, str, getColNo(dt, measureName, str), valueType);
         }
         public object getValue(DateTime dt, string str, int no, valueType valueType = valueType.MEAN)
         {
@@ -834,7 +845,7 @@ namespace loadData
         }
         public void setValue(DateTime dt, string str, string measureName, int value)
         {
-            values.setValue(dt, str, measureName, value);
+            setValue(dt, str, getColNo(dt, measureName, str), value);
         }
         public void setValue(DateTime dt, string str, int no, int value)
         {
@@ -842,7 +853,7 @@ namespace loadData
         }
         public void setValue(DateTime dt, string str, string measureName, double value)
         {
-            values.setValue(dt, str, measureName, value);
+            setValue(dt, str, getColNo(dt, measureName, str), value);
         }
         public void setValue(DateTime dt, string str, int no, double value)
         {
@@ -850,7 +861,7 @@ namespace loadData
         }
         public void setValue(DateTime dt, string str, string measureName, string value)
         {
-            values.setValue(dt, str, measureName, value);
+            setValue(dt, str, getColNo(dt, measureName, str), value);
         }
         public void setValue(DateTime dt, string str, int no, string value)
         {
@@ -858,7 +869,7 @@ namespace loadData
         }
         public void setValue(DateTime dt, string str, string measureName, int[] value)
         {
-            values.setValue(dt, str, measureName, value);
+            setValue(dt, str, getColNo(dt, measureName, str), value);
         }
         public void setValue(DateTime dt, string str, int no, int[] value)
         {
@@ -866,7 +877,7 @@ namespace loadData
         }
         public void setValue(DateTime dt, string str, string measureName, double[] value)
         {
-            values.setValue(dt, str, measureName, value);
+            setValue(dt, str, getColNo(dt, measureName, str), value);
         }
         public void setValue(DateTime dt, string str, int no, double[] value)
         {
@@ -874,6 +885,7 @@ namespace loadData
         }
     }
 }
+
 
 /*
 using System;
@@ -1116,7 +1128,7 @@ void uploadData(String siteName)
                 }
 
                 //Decode our Measure (should be cached...)
-                String[] mName = decodeName(myM.measureName[iCol]);
+                String[] mName = glob.decodeName(myM.measureName[iCol]);
 
                 // get our String in the array
                 int stringNo = 0;
