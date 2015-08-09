@@ -1,30 +1,36 @@
 ﻿/*  NEW TABLES
   Scripts creation solaSW !
  
-drop table inverters
+drop table inverter
 ;
-CREATE TABLE dbo.inverters(
-	serialNo varchar(50) not null primary key,
-
+drop table site
+;
+CREATE TABLE dbo.site(
 	-- company
 	company varchar(50) not NULL,
 
 	-- site specific information
-	site varchar(50) NOT NULL,
+	name varchar(50) NOT NULL primary key,
 	longitude decimal(9, 6) default 0,
 	latitude decimal(9, 6) default 0,
 	city varchar(50) not null,
 	country varchar(50) not null,
-
+    sitePower bigint not null
+ )
+;
+CREATE TABLE dbo.inverter(
+	siteName varchar(50) NOT NULL references site(name),
+	
 	-- Inverter specific information
-	name varchar(50) NOT NULL,
-	power bigint not null,
+	serialNo varchar(50) NOT NULL primary key,
+	otherName varchar(50) not null,
+	inverterPower bigint not null,
 	model varchar(50) not null,
 	type tinyint not NULL,
-	nbMeasures int not null,
-	nbStrings int not null,
 	sensorSN varchar(50) null
-);
+)
+;
+
 
  
 /* OLD SCRIPT .....
@@ -330,7 +336,7 @@ using System.Threading.Tasks;
 
 namespace loadData
 {
-    class dbserver
+    public class dbserver
     {
         String strConnect = "Data Source=.; Initial Catalog = solarSW ; Integrated Security = true ; Connection Timeout=10 ; Min Pool Size=2 ; Max Pool Size=20;";
         SqlConnection con;
@@ -371,24 +377,26 @@ namespace loadData
         {
             Dictionary<String, inverter> allInvs = new Dictionary<string, inverter>();
             inverter oneInv;
-            String serialNo, company, name, model, sensorSN;
-            long power;
-            int type, nbMeasures, nbStrings;
+            String serialNo, company, otherName, model, sensorSN;
+            long sitePower, inverterPower;
+            int type;
             invType invTp;
 
-            using(SqlCommand cde = new SqlCommand("select serialNo, company, name, power, model, type, nbMeasures, nbStrings, sensorSN from inverters;", con))
+            using(SqlCommand cde = new SqlCommand(
+                "select company, sitePower, serialNo, otherName, inverterPower, model, type, sensorSN "+
+                " from inverter join site on siteName = name " +
+                "where siteName = '"+ siteName+"';", con))
             {
                 SqlDataReader myRdr = cde.ExecuteReader();
                 while (myRdr.Read()) {
-                    serialNo = myRdr.GetString(0);
-                    company = myRdr.GetString(1);
-                    name = myRdr.GetString(2);
-                    power = myRdr.GetInt64(3);
-                    model = myRdr.GetString(4);
-                    type = myRdr.GetInt32(5);
-                    nbMeasures = myRdr.GetInt32(6);
-                    nbStrings = myRdr.GetInt32(7);
-                    sensorSN = myRdr.GetString(8);
+                    company = myRdr.GetString(0);
+                    sitePower = myRdr.GetInt64(1);
+                    serialNo = myRdr.GetString(2);
+                    otherName = myRdr.GetString(3);
+                    inverterPower = myRdr.GetInt64(4);
+                    model = myRdr.GetString(5);
+                    type = (int)myRdr.GetByte(6);
+                    sensorSN = myRdr.GetString(7);
                     switch(type){
                         case 1:
                         invTp = invType.WEBBOX;
@@ -401,26 +409,61 @@ namespace loadData
                         break;
                     }
 
-                    oneInv = new inverter(company, name, model, serialNo, power, invTp, nbMeasures, nbStrings, sensorSN);
+                    oneInv = new inverter(company, siteName, sitePower, serialNo, otherName, inverterPower, model, invTp, sensorSN, true);
                     allInvs.Add(oneInv.serialNo, oneInv);
                 }
                 myRdr.Close();
             }
             return allInvs;
         }
-        public void createOneInverter(String siteName)
+        public void createMissingInverters(String siteName)
         {
-/*
-            foreach(String key in invInAllM.Keys){
-                if (key == null || key.Length == 0)
+            foreach(inverter inv in glob.inverters.Values){
+                if (inv.bInDb)
                     continue;
-                int isItWebBox = (invInAllM[key].StartsWith("WebBox")) ? 1 : 0;
+                if (inv.siteName != siteName)
+                    continue;
                 using (SqlCommand cde = new SqlCommand(
-                    "INSERT INTO [dbo].[inverters] ([company], [site], [longitude],[latitude],[mainPanel],[distributionBoard],[inverter], [isItWebBox]) VALUES ("+
-                    "'???', '" + siteName +"', 0, 0, '???', '???', '" +  key + "', " + isItWebBox + ");", con))
+                    "INSERT INTO [dbo].[inverter] (siteName, serialNo, otherName, inverterPower, model, type, sensorSN) VALUES(" +
+                    "'" + siteName + "', '" + inv.serialNo + "', '" + inv.otherName + "', " + inv.inverterPower + "," +
+                    "'" + inv.model + "', " + (int)inv.type + ", '" + inv.sensorSN + "');", con))
                         cde.ExecuteNonQuery();
+                inv.bInDb = true;
             }
-  */      }
+        }
+        public void createSite(String siteName)
+        {
+            using (SqlCommand cde = new SqlCommand(
+                "insert into site(company, name, longitude, latitude, city, country, sitePower) values (" +
+                "'???', '" + siteName + "', 0, 0, '???', '???', 0);", con))
+                cde.ExecuteNonQuery();
+        }
+        public void checkIfSiteExist(String siteName)
+        {
+            int rowCount;
+            using (SqlCommand cde = new SqlCommand(
+                "select count(*) from site where name = '" + siteName + "';", con))
+                rowCount = (int)cde.ExecuteScalar();
+            if (rowCount != 1)
+                createSite(siteName);
+        }
+        public double getPreviousDaily(String siteName, String aString, DateTime dtMeasure, out DateTime previousDate)
+        {
+            previousDate = dtMeasure.AddMinutes(-5);
+            // select top 1 daily from table, where siteName, aString, <drMesure totWh not null order by date Desc
+            return 0;
+        }
+        public void prepareRow()
+        {
+
+        }
+        public void loadRow(measureDef mDef, valueDTP dType, object val){
+
+        }
+        public void writeRow()
+        {
+
+        }
 
         /*
         public void loadData(String [][]measuresFromOneFile, Boolean[] bFlush, String siteName){

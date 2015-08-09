@@ -19,6 +19,7 @@ namespace loadData
         static public Dictionary<String, string> allMNames = new Dictionary<string, string>();
         static public ListBox lbResult;
         static public int MAX_VALUES = 30;
+        static public dbserver dbs;
 
         private static glob _me = new glob();
 
@@ -38,6 +39,9 @@ namespace loadData
         {
             String[] strName = new String[5];
             String[] tmpStr = mName.Split(new char[] { '.' });
+            for (int ii = 0; ii < tmpStr.Count(); ii++)
+                if(tmpStr[ii] != null && tmpStr[ii].Length >0)
+                    tmpStr[ii] = tmpStr[ii].Trim();
 
             strName[4] = mName;
             strName[0] = tmpStr[0];
@@ -105,11 +109,9 @@ namespace loadData
     }
     class loadData
     {
-        private int MAX_VALUES_PER_LINE = 150;
         private int MAX_VALUES = glob.MAX_VALUES;
         private const int MAX_STRING = 10;
-        dbserver dbs;
-        private Boolean[] bFlushMaster;
+        
         // for dev 
         Boolean BOnlyOne = true;
 
@@ -137,8 +139,8 @@ namespace loadData
 
         public void runForThisSite(String siteName, String fileType)
         {
-            dbs = new dbserver(siteName);
-            loadAndCheckInverters(siteName);
+            Boolean bLoaded = false;
+            glob.dbs = new dbserver(siteName);
 
             String[] allFileNames = Directory.GetFiles(".", "*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
 
@@ -147,6 +149,12 @@ namespace loadData
                 case "csv":
                     foreach (String fileName in allFileNames)
                     {
+                        if (!bLoaded)
+                        {
+                            glob.dbs.checkIfSiteExist(siteName);
+                            glob.inverters = glob.dbs.loadInverters(siteName);
+                            bLoaded = true;
+                        }
                         //oneMeasure oneM = loadACsv(fileName);
                         //if (oneM.values.Count > 0)
                         //    glob.allM.Add(oneM);
@@ -157,6 +165,17 @@ namespace loadData
                 case "xml":
                     foreach (String oneFile in allFileNames)
                     {
+                            if (!bLoaded)
+                        {
+                            glob.dbs.checkIfSiteExist(siteName);
+                            glob.inverters = glob.dbs.loadInverters(siteName);
+                            bLoaded = true;
+                        }
+                        if (glob.lbResult.Items.Count > 50)
+                            glob.lbResult.Items.Clear();
+                        glob.lbResult.Items.Add("Unzip: " + oneFile);
+                        glob.lbResult.Refresh();
+                        Application.DoEvents();
                         using (var file = File.OpenRead(oneFile))
                         {
                             try
@@ -165,6 +184,7 @@ namespace loadData
                                 {
                                     foreach (var entry in zip.Entries)
                                     {
+                                        //glob.lbResult.Items.Add("   file " + entry);
                                         loadXml(siteName, entry.Open());
                                     }
                                 }
@@ -178,14 +198,36 @@ namespace loadData
 
                     break;
             }
+            if (!bLoaded)
+                return;
+            // set default sensorBoxId
+            glob.dbs.createMissingInverters(siteName);
+            string sensorBoxId = null;
+            foreach (inverter inv in glob.inverters.Values)
+            {
+                if (inv.type == invType.SENSOR)
+                {
+                    sensorBoxId = inv.serialNo;
+                    break;
+                }
+            }
+            if (sensorBoxId != null)
+            {
+                foreach (inverter inv in glob.inverters.Values)
+                {
+                    if (inv.sensorSN == null)
+                        inv.sensorSN = sensorBoxId;
+                }
+            }
+            // compute ratio
+            foreach (inverter inv in glob.inverters.Values)
+            {
+                inv.computeRatios();
+            }
 
-            //dbs.checkInverters(siteName, glob.allM);
-            //dbs.checkDateTimeLine(glob.allM);
+            uploadData(siteName);
 
-            //processData(glob.allM);
-
-            //uploadData(siteName);
-
+            glob.inverters = new Dictionary<string, inverter>();
         }
         public void loadXml(String siteName, Stream strm)
         {
@@ -223,14 +265,22 @@ namespace loadData
 
                         if (!glob.inverters.ContainsKey(strInfo[1]))
                         {
-                            inv = new inverter(siteName, strInfo[0], "???", strInfo[1]);
+                            inv = new inverter("",siteName, 0, strInfo[1], "???", 0, strInfo[0]);
                             glob.inverters.Add(inv.serialNo, inv);
                         }
                         else
                             inv = glob.inverters[strInfo[1]];
-                        internalName = glob.allMNames[strInfo[2]];
+                        if (glob.allMNames.ContainsKey(strInfo[2]))
+                        {
+                            internalName = glob.allMNames[strInfo[2]];
+                        }
+                        else
+                        {
+                            Console.WriteLine("Measure: " + strInfo[2] + " not found in allMNames");
+                            return;
+                        }
                         if (internalName == null)
-                            internalName = glob.buildInternalName(measureNamesSplitted);
+                            return;
                         if (!glob.allM.ContainsKey(internalName))
                         {
                             MessageBox.Show ("No measure definition for " + strInfo[2] + "("+internalName+")");
@@ -279,6 +329,40 @@ namespace loadData
                 throw ex;
             }
         }
+        public void uploadData(string siteName)
+        {
+            foreach (inverter inv in glob.inverters.Values)
+            {
+                stringVal strVal = inv.values;
+                for (int iStrVal = 0; iStrVal < strVal.dVals.Count; iStrVal++)
+                {
+                    String aString = strVal.stringNames[iStrVal];
+                    dateVal dtVal = strVal.dVals[iStrVal];
+
+                    foreach (DateTime aDate in dtVal.valsPerDate.Keys)
+                    {
+                        valueVal valVal = dtVal.valsPerDate[aDate];
+
+                        List<object> objVal = (List<object>)valVal.val;
+
+                        glob.dbs.prepareRow();
+                        Boolean bFlushRow = false;
+
+                        foreach (String mInternalName in inv.measureInternalNameArray.Keys)
+                        {
+                            int iVal = inv.measureInternalNameArray[mInternalName];
+                            measureDef mDef = glob.allM[mInternalName];
+                            if (mDef.bFlushDBRow)
+                                bFlushRow = true;
+                            glob.dbs.loadRow(mDef, inv.dataTP[iVal], objVal[iVal]);
+                        }
+                        if (bFlushRow)
+                            glob.dbs.writeRow();
+                    }
+
+                }
+            }
+        }
         int getNodeValInt(XmlNode xnd, String key)
         {
             int ii = 0;
@@ -324,7 +408,9 @@ namespace loadData
             }
             if (strRet.Count() != 3)
                 throw new Exception("invalid node information: " + xnd.OuterXml);
-
+            for (int ii = 0; ii < strRet.Count(); ii++)
+                if (strRet[ii] != null && strRet[ii].Length > 0)
+                    strRet[ii] = strRet[ii].Trim();
             return strRet;
         }
         String getNodeValueString(XmlNode xnd, String key)
@@ -337,7 +423,8 @@ namespace loadData
                     return xx.InnerText;
                 }
             }
-            MessageBox.Show("Key: " + key + " not found in node: " + xnd.OuterXml);
+            if(key != "Unit")
+                MessageBox.Show("Key: " + key + " not found in node: " + xnd.OuterXml);
 
             return null;
         }
@@ -382,8 +469,13 @@ namespace loadData
                 {"Isolation.LeakRis", 21}, 
                 {"Operation.GriSwCnt", 22}, 
                 {"Operation.Health", 23},
+                
+                // mapping for computed values
+                {"Computed.generated", 24},
+                {"Computed.perf.ratio", 25},
+
                 // mapping for name errors
-                {"6627584", -1},    //1
+                {"6627584", -1},    //1  "6627584[A1]"
                 {"4529920",-1},     //2
                 {"2432512",-1},     //3
                 {"4609792",-1},
@@ -412,7 +504,7 @@ namespace loadData
                 new measureDef ("mod_Temp", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE),
                 new measureDef ("time_FeedIn", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.DOUBLE),
                 new measureDef ("time_Operating", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.DOUBLE),
-                new measureDef ("Out_EnergyDaily", "Metering", "TotWhOut", "", 14, "W", true, valueDTP.DOUBLE),
+                new measureDef ("Out_EnergyDaily", "Metering", "TotWhOut", "", 14, "Wh", true, valueDTP.DOUBLE),
                 new measureDef ("evt_Description", "Operation", "Evt", "Dsc", 15, "String", false, valueDTP.STRING),
                 new measureDef ("evt_No", "Operation", "Evt", "No", 16, "String", true, valueDTP.STRING),
                 new measureDef ("evt_NoShort", "Operation", "Evt", "NoShrt", 17, "String", false, valueDTP.STRING),
@@ -421,7 +513,9 @@ namespace loadData
                 new measureDef ("isol_Flt", "Isolation", "Flt", "", 20, "String", false, valueDTP.M3DOUBLE),
                 new measureDef ("isol_LeakRis", "Isolation", "LeakRis", "", 21, "String", false, valueDTP.M3DOUBLE),
                 new measureDef ("gridSwitchCount", "Operation", "GriSwCnt", "", 22, "String", false, valueDTP.DOUBLE),
-                new measureDef ("Health", "Operation", "Health", "", 23, "String", false, valueDTP.STRING) 
+                new measureDef ("Health", "Operation", "Health", "", 23, "String", false, valueDTP.STRING),
+                new measureDef ("generated", "Computed", "generated", "", 24, "kWh", false, valueDTP.DOUBLE),
+                new measureDef ("perf_ratio", "Computed", "perf", "ratio", 25, "%", false, valueDTP.DOUBLE)
             };
 
             foreach (measureDef mDef in measuresDef)
@@ -442,10 +536,6 @@ namespace loadData
                 }
                 glob.allMNames.Add(strRedir, intName);
             }
-        }
-        public void loadAndCheckInverters(String siteName)
-        {
-            glob.inverters = dbs.loadInverters(siteName);
         }
     }
         public class measureDef
@@ -489,7 +579,7 @@ namespace loadData
         public void checkSlot(int no)
         {
             List<object> valObj = (List<object>)val;
-            while (no > valObj.Count)
+            while (no >= valObj.Count)
                 valObj.Add(null);
         }
         public object getValue(int no)
@@ -505,18 +595,45 @@ namespace loadData
             valObj[no] = value;
         }
     }
+
+    /// <summary>
+    /// DATEVAL
+    /// </summary>
+    public class dateVal
+    {
+        public SortedDictionary<DateTime, valueVal> valsPerDate;
+
+        public dateVal()
+        {
+            valsPerDate = new SortedDictionary<DateTime, valueVal>();
+        }
+        DateTime getDateIdx(DateTime dt)
+        {
+            if (!valsPerDate.ContainsKey(dt))
+                valsPerDate.Add(dt, new valueVal());
+            return dt;
+        }
+        public object getValue(DateTime dt, int no)
+        {
+            return valsPerDate[getDateIdx(dt)].getValue(no);
+        }
+        public void setValue(DateTime dt, int no, object value)
+        {
+            valsPerDate[getDateIdx(dt)].setValue(no, value);
+        }
+    }
     /// <summary>
     /// STRINGVAL
     /// </summary>
     public class stringVal
     {
-        List<string> stringNames;
-        List<valueVal> vVals;
+        public List<string> stringNames;
+        public List<dateVal> dVals;
 
         public stringVal()
         {
             stringNames = new List<string>();
-            vVals = new List<valueVal>();
+            dVals = new List<dateVal>();
         }
         int getStringNo(String str)
         {
@@ -527,51 +644,18 @@ namespace loadData
             }
             this.stringNames.Add(str);
             int noStr = getStringNo(str);
-            vVals.Add(new valueVal());
-            if (vVals.Count != stringNames.Count)
+            dVals.Add(new dateVal());
+            if (dVals.Count != stringNames.Count)
                 throw new Exception("stringVal.getStrinNo: internal inconsistency");
             return noStr;
         }
-        public object getValue(string str, int no, valueType valueType = valueType.MEAN)
-        {
-            return vVals[getStringNo(str)].getValue(no);
-        }
-        public void setValue(string str, int no, object value)
-        {
-            vVals[getStringNo(str)].setValue(no, value);
-        }
-    }
-    /// <summary>
-    /// DATEVAL
-    /// </summary>
-    public class dateVal
-    {
-        List<DateTime> aDates;
-        List<stringVal> sVals;
-
-        public dateVal()
-        {
-            aDates = new List<DateTime>();
-            sVals = new List<stringVal>();
-        }
-        int getDateNo(DateTime dt)
-        {
-            for (int i = 0; i < aDates.Count(); i++)
-            {
-                if (dt == aDates[i])
-                    return i;
-            }
-            this.aDates.Add(dt);
-            sVals.Add(new stringVal());
-            return getDateNo(dt);
-        }
         public object getValue(DateTime dt, string str, int no)
         {
-            return sVals[getDateNo(dt)].getValue(str, no);
+            return dVals[getStringNo(str)].getValue(dt, no);
         }
         public void setValue(DateTime dt, string str, int no, object value)
         {
-            sVals[getDateNo(dt)].setValue(str, no, value);
+            dVals[getStringNo(str)].setValue(dt, no, value);
         }
     }
     /// <summary>
@@ -581,46 +665,49 @@ namespace loadData
     public enum valueType { MEAN = 0, MIN = 1, MAX = 2, UNDEFINED=99 };
     public class inverter
     {
-        public String name;
         public String company;
-        public String model;
+        public String siteName;
+        public long sitePower;
         public String serialNo;
-        public long power;
+        public String otherName;
+        public long inverterPower;
+        public String model;
+        public invType type;
+        public String sensorSN;
+        public Boolean bInDb;
+
         public List<valueDTP> dataTP;
         public Dictionary<String, int> measureInternalNameArray;        // internal, colNber
-        public dateVal values;        // dateVal, StringVal, ValueVal
-        public invType type;
-        public int nbStrings;
-        public int nbMeasures;
-        public String sensorSN;
-
-        public inverter(String company, String name, String model, String serialNo, long power = 0, invType type = invType.INVERTER,
-                        int nbMeasures = -1, int nbStrings = 20, String sensorSN = null)
+        public stringVal values;        // dateVal, StringVal, ValueVal
+        
+        public inverter(String company, String siteName, long sitePower, String serialNo, String otherName, long inverterPower, 
+                        String model, invType type = invType.INVERTER, String sensorSN = null, Boolean bInDBFlag = false)
         {
-            if (nbMeasures == -1)
-                nbMeasures = glob.MAX_VALUES;
-            this.name = name;
-            this.model = model;
+            this.company = company;
+            this.siteName = siteName;
+            this.sitePower = sitePower;
             this.serialNo = serialNo;
+            this.otherName = siteName;
+            this.inverterPower=inverterPower;
+            this.model = model;
             this.type = type;
+            this.sensorSN = sensorSN;
+            this.bInDb = bInDBFlag;
+
             this.dataTP = new List<valueDTP>();
             this.measureInternalNameArray = new Dictionary<string, int>();     // internalNames
-            if (power == 0)
+            if (inverterPower == 0)
             {
                 string output = new string(model.Where(c => char.IsDigit(c)).ToArray());
-                power = 0;
-                long.TryParse(output, out power);
+                inverterPower = 0;
+                long.TryParse(output, out inverterPower);
             }
-            this.company = company;
-            this.nbMeasures = nbMeasures;
-            this.nbStrings = nbStrings;
-            this.sensorSN = sensorSN;
-            if (this.name.ToLower().Contains("webbox"))
+            if (this.model.ToLower().Contains("webbox"))
                 this.type = invType.WEBBOX;
             else
-                if (this.name.ToLower().Contains("sensor"))
+                if (this.model.ToLower().Contains("sensor"))
                     this.type = invType.SENSOR;
-            this.values = new dateVal();
+            this.values = new stringVal();
         }
         int getColNo(DateTime mDate, String measureName, String str)
         {
@@ -716,419 +803,77 @@ namespace loadData
         {
             values.setValue(dt, str, no, value);
         }
-    }
-}
-
-
-/*
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ReadWriteCsv;
-using System.IO;
-
-namespace loadCsv
-{
-class Program
-{
-static void Main(string[] args)
-{
-    if (args.Length == 0)
-    {
-        Console.WriteLine("Usage: loadCsv site_name");
-        return;
-    }
-    loadData ld = new loadData();
-    ld.run(args[0]);
-}
-}
-class loadData
-{
-Dictionary<String, String> transcodName = new Dictionary<string, string>()
-{
-//               {"4530432", "7"},
-//               {"4609792", "8"},
-//               {"4529920", "9"},
-    // from site nortHillFarm
-        {"6627584", "-1"},//1
-        {"4529920","-1"},//2
-        {"2432512","-1"},//3
-        {"4609792","-1"},
-        {"2506496","-1"},
-        {"4608512","-1"},
-        {"4608256","-1"},
-        {"4608000","-1"},
-        {"4606464","-1"},
-        {"4606208","-1"},
-        {"4605952","-1"},
-        {"4530432","-1"}
-};
-
-List<String[]> paramDef = new List<String[]> {
-    // displayName, root, suffix1, suffix2, index in values[], Unit, neededToWriteARow, [MinMaxMean=1, MeanOnly = 0]
-    new string [] {"dc_Current", "DcMs", "Amp", "", "1", "A", "1", "0"},
-    new string [] {"dc_Voltage","DcMs", "Vol", "", "2", "V", "1", "1"},
-    new string [] {"dc_Power", "DcMs", "Watt", "", "3", "W", "1", "1"},
-    new string [] {"environmentTemp", "Env", "TmpVal", "", "4", "C", "1", "1"},
-    new string [] {"envirnomentTotalInsolation", "Env", "TotInsol", "", "5", "w/m2", "1", "1"},
-    new string [] {"envirnomentWindspeed", "Env", "HorWSpd", "", "6", "m/s", "1", "1"},
-    new string [] {"current", "GridMs", "A", "", "7", "A", "1", "1"},
-    new string [] {"frequency", "GridMs", "Hz", "", "8", "Hz", "1", "1"},
-    new string [] {"voltage", "GridMs", "PhV", "", "9", "V", "1", "1"},
-    new string [] {"activePower", "GridMs", "TotW", "", "10", "W", "1", "1"},
-    new string [] {"mod_Temp", "Mdul", "TmpVal", "", "11", "C", "0", "1"},
-    new string [] {"time_FeedIn", "Metering", "TotFeedTms", "", "12", "?", "0", "0"},
-    new string [] {"time_Operating", "Metering", "TotOpTms", "", "13", "h", "0", "0"},
-    new string [] {"Out_EnergyDaily", "Metering", "TotWhOut", "", "14", "W", "1", "0"},
-    new string [] {"evt_Description", "Operation", "Evt", "Dsc", "15", "String", "0", "0"},
-    new string [] {"evt_No", "Operation", "Evt", "EvtNo", "16", "String", "1", "0"},
-    new string [] {"evt_NoShort", "Operation", "Evt", "EvtNoShrt", "17", "String","0", "0"},
-    new string [] {"evt_Msg", "Operation", "Evt", "Msg", "18", "String", "1", "0"},
-    new string [] {"evt_Prior", "Operation", "Evt", "Prio", "19", "String", "0", "0"},
-    new string [] {"isol_Flt", "Isolation", "Flt", "", "20", "String", "0", "1"},
-    new string [] {"isol_LeakRis", "Isolation", "LeakRis", "", "21", "String", "0", "1"},
-    new string [] {"gridSwitchCount", "Operation", "GriSwCnt", "", "22", "String", "0", "0"},
-    new string [] {"Health", "Operation", "Health", "", "23", "String", "0", "0"} };
-
-
-private allMeasures allM = new allMeasures();
-private int MAX_VALUES_PER_LINE = 150;
-private int MAX_VALUES;
-private const int MAX_STRING = 10;
-dbserver dbs;
-private Boolean [] bFlushMaster;
-
-public void run(String siteName)
-{
-    MAX_VALUES = paramDef.Count + 4;        // 4 for date, time, inverterSN, String
-    Directory.SetCurrentDirectory(siteName);
-    dbs = new dbserver(siteName);
-    String[] allFileNames = Directory.GetFiles(".", "*.csv", SearchOption.AllDirectories);
-    Boolean BOnlyOne = false;
-    bFlushMaster = new Boolean[paramDef.Count+5];
-    bFlushMaster[0] = false;
-    bFlushMaster[1] = false;
-    bFlushMaster[2] = false;
-    bFlushMaster[3] = false;
-    bFlushMaster[4] = false;
-    for (int i = 0; i < paramDef.Count + 5; i++)
-    {
-        if (i < 5)
-            bFlushMaster[i] = false;
-        else
-            bFlushMaster[i] = paramDef[i-5][6] == "1" ? true : false;
-    }
-    foreach (String fileName in allFileNames)
-    {
-        oneMeasure oneM = loadACsv(fileName);
-        if (oneM.values.Count > 0)
-            allM.Add(oneM);
-        if (BOnlyOne)
-            break;
-    }
-    Directory.SetCurrentDirectory("..");
-
-    dbs.checkInverters(siteName, allM);
-    dbs.checkDateTimeLine(allM);
-
-    processData(allM);
-            
-    uploadData(siteName);
-}
-
-oneMeasure loadACsv(String fileName)
-{
-    int LineNo = 0;
-    Console.WriteLine("Loading: " + fileName);
-    oneMeasure oneM = new oneMeasure(MAX_VALUES_PER_LINE);
-
-    using (CsvFileReader reader = new CsvFileReader(fileName))
-    {
-        CsvRow row = new CsvRow();
-        while (reader.ReadRow(row) && LineNo++ < 10000)
+        public void computeRatios()
         {
-            switch (LineNo)
+            double previousTotWhOut;
+            double currentTotWhOut;
+            DateTime previousDate;
+            double generated;
+            double perfRatio;
+            int dailyCol, geneCol=-1, ratioCol=-1;
+
+            // Metering.TotWhOut
+            if (this.type != invType.INVERTER)
+                return;
+            stringVal strVal = this.values;
+            if(!measureInternalNameArray.ContainsKey("Metering-TotWhOut"))
+                return;
+            dailyCol = measureInternalNameArray["Metering-TotWhOut"];
+            for (int iStrVal = 0; iStrVal < strVal.dVals.Count; iStrVal++)
             {
-                case 1:
-                case 2:
-                case 3:
-                    break;
-                case 4:
-                    oneM.inverter = row.ToArray();
-                    break;
-                case 5:
-                    oneM.inverterType = row.ToArray();
-                    break;
-                case 6:
-                    oneM.inverterSN = row.ToArray();
-                    break;
-                case 7:
-                    row.Add("generated");
-                    row.Add("perf Ratio");
-                    oneM.measureName = row.ToArray();
-                    break;
-                case 8:
-                    break;
-                case 9:
-                    row.Add("kWh");
-                    row.Add("%");
-                    oneM.measureUnit = row.ToArray();
-                    break;
-                default:
-                    row.Add("");
-                    row.Add("");
-                    oneM.addMeasure(row);
-                    if(oneM.env == null){
-                        oneM.env = new double[2][];
-                        oneM.env[0] = new double[row.Count];
-                        oneM.env[1] = new double[row.Count];
-                    }
-                    break;
-            }
-            //foreach (string s in row)
-            // {
-            //Console.Write(s);
-            //Console.Write(" ");
-            //}
-            //Console.WriteLine();
-        }
-    }
-    return oneM;
-}
-void processData(allMeasures allM)
-{
-    Dictionary<String, Double> currentGenerated = new Dictionary<string, double>();
-    List<oneMeasure> allMSorted = allM.OrderBy(m => m.dateMin).ToList<oneMeasure>();
-    foreach (oneMeasure oneM in allMSorted )
-    {
+                String aString = strVal.stringNames[iStrVal];
+                dateVal dtVal = strVal.dVals[iStrVal];
+                if(dtVal.valsPerDate == null || dtVal.valsPerDate.Count == 0)
+                    continue;
+                DateTime dtFirst = dtVal.valsPerDate.Keys.First();
+                previousTotWhOut = glob.dbs.getPreviousDaily(siteName, aString, dtFirst, out previousDate);
 
-
-    }
-
-
-}
-void uploadMe(String[][] dt, String siteName)
-{
-    dbs.loadData(dt, bFlushMaster, siteName);
-}
-void uploadData(String siteName)
-{
-    String currentInv = "????";
-    // array per Date
-    //   then per String
-    String[][] valueUpload = null;
-
-    for (int iOneMIndx = 0; iOneMIndx < allM.Count(); iOneMIndx++)
-    {
-        oneMeasure myM = allM[iOneMIndx];
-
-        MAX_VALUES_PER_LINE = paramDef.Count + 5;
-        currentInv = "????";
-        Console.WriteLine("upLoading: " + myM.values[0][0]);
-
-        for (int iLine = 0; iLine < myM.values.Count; iLine++)
-        {
-            for (int iCol = 0; iCol < myM.values[iLine].Length; iCol++)
-            {
-                if (currentInv != myM.inverterSN[iCol])
+                foreach (DateTime aDate in dtVal.valsPerDate.Keys)
                 {
-                    // Skip the first col, and the empty columns
-                    if (myM.inverterSN[iCol] == null || myM.inverterSN[iCol].Length == 0)
-                    {
-                        currentInv = "????";
+                    valueVal valVal = dtVal.valsPerDate[aDate];
+
+                    List<object> lstVal = (List<object>)valVal.val;
+                    if (lstVal == null || dailyCol > lstVal.Count || lstVal[dailyCol] == null)
                         continue;
-                    }
-                    // go to our server
-                    if (valueUpload != null)
-                        uploadMe(valueUpload, siteName);
 
-                    valueUpload = new String[MAX_STRING][];
-                    currentInv = myM.inverterSN[iCol];
-
-                    DateTime dtMeasure = DateTime.Parse(myM.values[iLine][0]);
-                    for (int i = 0; i < MAX_STRING; i++)
+                    if (aDate == dtFirst)
                     {
-                        valueUpload[i] = new String[MAX_VALUES_PER_LINE];
-
-                        valueUpload[i][0] = dtMeasure.ToShortDateString();
-                        valueUpload[i][1] = dtMeasure.ToShortTimeString();
-                        valueUpload[i][2] = myM.inverterSN[iCol];
-                        valueUpload[i][3] = null;
-                        valueUpload[i][4] = myM.inverterType[iCol];
+                        geneCol = getColNo(aDate, "Computed.generated", aString);
+                        ratioCol = getColNo(aDate, "Computed.perf.ratio", aString);
                     }
-                }
+                    currentTotWhOut = (Double) lstVal[dailyCol];
 
-                //Decode our Measure (should be cached...)
-                String[] mName = glob.decodeName(myM.measureName[iCol]);
-
-                // get our String in the array
-                int stringNo = 0;
-                if (mName[3] != "" && mName.Length != 0)
-                {
-                    for (int i = 1; i < MAX_STRING; i++)
-                    {
-                        if (valueUpload[i][3] == mName[3])
-                        {
-                            stringNo = i;
+                    switch (validateDailyHisto(previousDate, aDate, previousTotWhOut, currentTotWhOut)){
+                        case histoValidation.OK:
+                            generated = currentTotWhOut - previousTotWhOut;
+                            this.values.setValue(aDate, aString, geneCol, (object)generated);
                             break;
-                        }
-                        if (valueUpload[i][3] == null)
-                        {
-                            valueUpload[i][3] = mName[3];
-                            stringNo = i;
+                        case histoValidation.IGNORE_MEASURE:
                             break;
-                        }
+                        case histoValidation.RESET_VALUE:
+                            this.values.setValue(aDate, aString, geneCol, (object)0);
+                            break;
                     }
-                    //throw new Exception("Impossible to store the string for Measure: " + myM.measureName[iCol]);
-                }
+                    previousDate = aDate;
+                    previousTotWhOut = currentTotWhOut;
 
-                // find measures def
-                bool bMeasureFound = false;
-                if (transcodName.ContainsKey(mName[0]))
-                {
-                    if (transcodName[mName[0]] == "-1")
-                    {
-                        bMeasureFound = true;
-                    }
-                    else
-                    {
-                        foreach (String[] oneDef in paramDef)
-                        {
-                            if (oneDef[4] == transcodName[mName[0]])
-                            {
-                                if (int.Parse(oneDef[4]) >= 0)
-                                {
-                                    if (myM.values[iLine][iCol] != null && myM.values[iLine][iCol].Length != 0)
-                                    {
-                                        valueUpload[stringNo][int.Parse(oneDef[4]) + 4] = myM.values[iLine][iCol];
-                                    }
-                                }
-                                bMeasureFound = true;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    foreach (String[] oneDef in paramDef)
-                    {
-                        if (oneDef[1].ToLower() == mName[0].ToLower())
-                        {
-                            if (mName[1] == null || (oneDef[2].ToLower() == mName[1].ToLower()))
-                            {
-                                if ((oneDef[3] == "" || mName[2] == "") ||
-                                    (oneDef[3].ToLower() == mName[2].ToLower()))
-                                {
-                                    if (int.Parse(oneDef[4]) >= 0)
-                                    {
-                                        if (myM.values[iLine][iCol] != null && myM.values[iLine][iCol].Length != 0)
-                                        {
-                                            valueUpload[stringNo][int.Parse(oneDef[4]) + 4] = myM.values[iLine][iCol];
-                                        }
-                                    }
-                                    bMeasureFound = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (!bMeasureFound)
-                {
-                    continue; 
+                    // compute perf ratio
+                    Random rd = new Random(DateTime.Now.Millisecond);
 
-                    throw new Exception("measure not used !!!");
+                    perfRatio = rd.Next(60, 100);
+                    this.values.setValue(aDate, aString, ratioCol, perfRatio);
                 }
-
-            }       // next ICol
+            }
         }
-        if (valueUpload != null)
+        enum histoValidation {OK, IGNORE_MEASURE, RESET_VALUE};
+        private histoValidation validateDailyHisto(DateTime prevDt, DateTime curDt, Double prevDaily, Double curDaily)
         {
-            uploadMe(valueUpload, siteName);
-            valueUpload = null;
+            if (curDaily < prevDaily)
+                return histoValidation.RESET_VALUE;
+            if (curDaily > (prevDaily + 100))
+                return histoValidation.RESET_VALUE;
+            return histoValidation.OK;
         }
-
     }
 }
-}
-public class allMeasures : List<oneMeasure>
-{
-//        List<oneMeasure> allM;
-public allMeasures()
-{
-    //            allM = new List<oneMeasure>();
-}
-}
-public class oneMeasure
-{
-private int max_values = 200;
-public String siteName;
-public DateTime dateMin;
-public DateTime dateMax;
-public String[] inverter;
-public String[] inverterSN;
-public String[] inverterType;
-public String[] measureName;
-//public String[] measureType;
-public String[] measureUnit;        // can get less element if the last are null...
-public double[][] env;
 
-public List<String[]> values;
-
-public oneMeasure(int mv = 200)
-{
-    max_values = mv;
-    values = new List<string[]>();
-    env = null;
-}
-public void addMeasure(CsvRow csvRow)
-{
-    values.Add(csvRow.ToArray<String>());
-    try
-    {
-        DateTime dt = DateTime.Parse(csvRow[0]);
-        // load dateMin/Max
-        if (dateMin == null || dt < dateMin)
-            dateMin = dt;
-        if (dateMax == null || dt > dateMax)
-            dateMax = dt;
-    }
-    catch(Exception ex)
-    {
-        ;
-    }
-
-}
-public String[] getData(string inv, string measure)
-{
-    int indx = 0;
-    Boolean bOK = false;
-    foreach (String mName in inverter)
-    {
-        if (mName == inv)
-        {
-            bOK = true;
-            break;
-        }
-        indx++;
-    }
-    if (!bOK)
-        throw new Exception("inverter " + inv + " not found");
-
-    String[] data = new String[max_values];
-
-    data[0] = inverter[indx];
-    data[1] = measureName[indx];
-    int indexValue = 2;
-    foreach (string[] vals in values)
-    {
-        data[indexValue] = values[indexValue - 2][indx];
-        indexValue++;
-    }
-    return data;
-}
-}
-}
-*/
