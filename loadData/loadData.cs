@@ -172,16 +172,16 @@ namespace loadData
                     {
                         glob.lbResult.Items.Clear();
                         glob.lbResult.Items.Add("new file: " + oneFile);
+                        String[] fnSplitted = oneFile.Split(new char[] { '\\' });
                         if (!bLoaded)
                         {
                             glob.dbs.switchSite(siteName);
                             glob.dbs.checkIfSiteExist(siteName);
                             glob.inverters = glob.dbs.loadInverters(siteName);
-                            fileNameRoot = oneFile.Substring(1, 9); 
+                            fileNameRoot = fnSplitted[fnSplitted.Count() - 1].Substring(1, 7);
                             bLoaded = true;
                         }
-                        String[] fnSplitted = oneFile.Split(new char[] { '\\' });
-                        if (fileNameRoot != fnSplitted[fnSplitted.Count() -1 ].Substring(1, 9))
+                        if (fileNameRoot != fnSplitted[fnSplitted.Count() -1 ].Substring(1, 7))
                         {
                             glob.lbResult.Items.Clear();
                             glob.lbResult.Items.Add("Saving data to the database");
@@ -858,7 +858,7 @@ namespace loadData
                     if (dtVal.valsPerDate == null || dtVal.valsPerDate.Count == 0)
                         continue;
                     DateTime dtFirst = dtVal.valsPerDate.Keys.First();
-                    previousTotWhOut = glob.dbs.getPreviousDaily(siteName, aString, dtFirst, out previousDate);
+                    previousTotWhOut = glob.dbs.getPreviousDaily(siteName, serialNo, aString, dtFirst, out previousDate);
 
                     foreach (DateTime aDate in dtVal.valsPerDate.Keys)
                     {
@@ -882,9 +882,10 @@ namespace loadData
                                 this.values.setValue(aDate, aString, geneCol, (object)generated);
                                 break;
                             case histoValidation.IGNORE_MEASURE:
+                                this.values.setValue(aDate, aString, geneCol, (object)-2);
                                 break;
                             case histoValidation.RESET_VALUE:
-                                this.values.setValue(aDate, aString, geneCol, (object)0);
+                                this.values.setValue(aDate, aString, geneCol, (object)-1);
                                 break;
                         }
                         previousDate = aDate;
@@ -908,8 +909,7 @@ namespace loadData
         {
             if (curDaily < prevDaily)
                 return histoValidation.RESET_VALUE;
-            if (curDaily > (prevDaily + 100))
-                return histoValidation.RESET_VALUE;
+
             return histoValidation.OK;
         }
     }

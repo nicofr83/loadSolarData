@@ -70,13 +70,13 @@
             // splitContainer1.Panel2
             // 
             this.splitContainer1.Panel2.Controls.Add(this.lbResult);
-            this.splitContainer1.Size = new System.Drawing.Size(1422, 919);
-            this.splitContainer1.SplitterDistance = 219;
+            this.splitContainer1.Size = new System.Drawing.Size(834, 918);
+            this.splitContainer1.SplitterDistance = 218;
             this.splitContainer1.TabIndex = 0;
             // 
             // btGo
             // 
-            this.btGo.Location = new System.Drawing.Point(982, 56);
+            this.btGo.Location = new System.Drawing.Point(700, 85);
             this.btGo.Name = "btGo";
             this.btGo.Size = new System.Drawing.Size(77, 23);
             this.btGo.TabIndex = 9;
@@ -97,7 +97,7 @@
             // rdXml
             // 
             this.rdXml.AutoSize = true;
-            this.rdXml.Location = new System.Drawing.Point(769, 108);
+            this.rdXml.Location = new System.Drawing.Point(486, 92);
             this.rdXml.Name = "rdXml";
             this.rdXml.Size = new System.Drawing.Size(40, 17);
             this.rdXml.TabIndex = 7;
@@ -109,7 +109,7 @@
             // rdCsv
             // 
             this.rdCsv.AutoSize = true;
-            this.rdCsv.Location = new System.Drawing.Point(832, 108);
+            this.rdCsv.Location = new System.Drawing.Point(549, 92);
             this.rdCsv.Name = "rdCsv";
             this.rdCsv.Size = new System.Drawing.Size(42, 17);
             this.rdCsv.TabIndex = 6;
@@ -120,7 +120,7 @@
             // 
             // textBox3
             // 
-            this.textBox3.Location = new System.Drawing.Point(610, 43);
+            this.textBox3.Location = new System.Drawing.Point(533, 40);
             this.textBox3.Name = "textBox3";
             this.textBox3.Size = new System.Drawing.Size(244, 20);
             this.textBox3.TabIndex = 5;
@@ -128,7 +128,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(560, 46);
+            this.label3.Location = new System.Drawing.Point(483, 43);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(35, 13);
             this.label3.TabIndex = 4;
@@ -171,9 +171,11 @@
             // 
             this.lbResult.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lbResult.FormattingEnabled = true;
+            this.lbResult.HorizontalScrollbar = true;
             this.lbResult.Location = new System.Drawing.Point(0, 0);
             this.lbResult.Name = "lbResult";
-            this.lbResult.Size = new System.Drawing.Size(1422, 696);
+            this.lbResult.ScrollAlwaysVisible = true;
+            this.lbResult.Size = new System.Drawing.Size(834, 696);
             this.lbResult.TabIndex = 0;
             // 
             // fBrowse
@@ -185,7 +187,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1422, 919);
+            this.ClientSize = new System.Drawing.Size(834, 918);
             this.Controls.Add(this.splitContainer1);
             this.Name = "Form1";
             this.Text = "Form1";

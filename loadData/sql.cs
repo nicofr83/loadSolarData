@@ -211,11 +211,28 @@ namespace loadData
             if (rowCount != 1)
                 createSite(siteName);
         }
-        public double getPreviousDaily(String siteName, String aString, DateTime dtMeasure, out DateTime previousDate)
+        public double getPreviousDaily(String siteName, String inverter, String aString, DateTime dtMeasure, out DateTime previousDate)
         {
+            double prevDaily = 0;
+            String strSql = "select top 1 energyDaily, dateMeasure from m_" + siteName + "_AC " +
+                "where aString = '" + aString + "' " +
+                 "and dateMeasure < '" + dtMeasure.ToString("yyyy-MM-dd hh:mm") + "' " +
+                 "and inverter = '" + inverter + "' " +
+                 "and energyDaily is not null " +
+                "order by dateMeasure DESC;";
             previousDate = dtMeasure.AddMinutes(-5);
-            // select top 1 daily from table, where siteName, aString, <drMesure totWh not null order by date Desc
-            return 0;
+            using (SqlCommand cde = new SqlCommand(strSql, con))
+            {
+                SqlDataReader myRdr = cde.ExecuteReader();
+                while (myRdr.Read())
+                {
+                    prevDaily = myRdr.GetDouble(0);
+                    previousDate = myRdr.GetDateTime(1);
+                }
+                myRdr.Close();
+            }
+
+            return prevDaily;
         }
         public void prepareTable(String siteName)
         {
