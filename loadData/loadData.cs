@@ -23,6 +23,7 @@ namespace loadData
         static public dbserver dbs = new dbserver();
         static public List<DataTable> allTables = new List<DataTable>();
         static public List<DataRow> allRows = new List<DataRow>();
+        static public int nbTablesDetail = 3;
 
         private static glob _me = new glob();
 
@@ -143,9 +144,8 @@ namespace loadData
         public void runForThisSite(String siteName, String fileType)
         {
             Boolean bLoaded = false;
-            glob.dbs.switchSite(siteName);
 
-            String[] allFileNames = Directory.GetFiles(".", "2015-07*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
+            String[] allFileNames = Directory.GetFiles(".", "*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
 
             switch (fileType.ToLower())
             {
@@ -154,6 +154,7 @@ namespace loadData
                     {
                         if (!bLoaded)
                         {
+                            glob.dbs.switchSite(siteName);
                             glob.dbs.checkIfSiteExist(siteName);
                             glob.inverters = glob.dbs.loadInverters(siteName);
                             bLoaded = true;
@@ -173,16 +174,18 @@ namespace loadData
                         glob.lbResult.Items.Add("new file: " + oneFile);
                         if (!bLoaded)
                         {
+                            glob.dbs.switchSite(siteName);
                             glob.dbs.checkIfSiteExist(siteName);
                             glob.inverters = glob.dbs.loadInverters(siteName);
-                            fileNameRoot = oneFile.Substring(1, 7); 
+                            fileNameRoot = oneFile.Substring(1, 9); 
                             bLoaded = true;
                         }
                         String[] fnSplitted = oneFile.Split(new char[] { '\\' });
-                        if (fileNameRoot != fnSplitted[fnSplitted.Count() -1 ].Substring(1, 7))
+                        if (fileNameRoot != fnSplitted[fnSplitted.Count() -1 ].Substring(1, 9))
                         {
                             glob.lbResult.Items.Clear();
                             glob.lbResult.Items.Add("Saving data to the database");
+                            glob.lbResult.Refresh();
 
                             saveToDb(siteName);
                             fileNameRoot = fnSplitted[fnSplitted.Count() - 1].Substring(1, 7);
@@ -242,7 +245,8 @@ namespace loadData
                     {
                         foreach (var entry in zip.Entries)
                         {
-                            //glob.lbResult.Items.Add("   file " + entry);
+                            glob.lbResult.Items.Add("   file " + entry);
+                            glob.lbResult.Refresh();
                             loadXml(siteName, entry.Open());
                         }
                     }
@@ -518,17 +522,17 @@ namespace loadData
                 new measureDef ("currentAmp", "DcMs", "Amp", "", 1, "A", true, valueDTP.DOUBLE, 1),
                 new measureDef ("voltage","DcMs", "Vol", "", 2, "V", true, valueDTP.M3DOUBLE, 1),
                 new measureDef ("power", "DcMs", "Watt", "", 3, "W", true, valueDTP.M3DOUBLE, 1),
-                new measureDef ("temperature", "Env", "TmpVal", "", 4, "C", true, valueDTP.M3DOUBLE, 3),
-                new measureDef ("insolation", "Env", "TotInsol", "", 5, "w/m2", true, valueDTP.M3INT, 3),
+                new measureDef ("temperature", "Env", "TmpVal", "", 4, "C", true, valueDTP.M3DOUBLE, 4),
+                new measureDef ("insolation", "Env", "TotInsol", "", 5, "w/m2", true, valueDTP.M3INT, 4),
                 new measureDef ("windspeed", "Env", "HorWSpd", "", 6, "m/s", true, valueDTP.M3DOUBLE, 4),
-                new measureDef ("current", "GridMs", "A", "", 7, "A", true, valueDTP.M3DOUBLE, 2),
+                new measureDef ("currentAmp", "GridMs", "A", "", 7, "A", true, valueDTP.M3DOUBLE, 2),
                 new measureDef ("frequency", "GridMs", "Hz", "", 8, "Hz", true, valueDTP.M3DOUBLE, 2),
                 new measureDef ("voltage", "GridMs", "PhV", "", 9, "V", true, valueDTP.M3DOUBLE, 2),
                 new measureDef ("activePower", "GridMs", "TotW", "", 10, "W", true, valueDTP.M3DOUBLE, 2),
-                new measureDef ("modTemperature", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE, 3),
+                new measureDef ("modTemperature", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE, 1),
                 new measureDef ("feedInTime", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.DOUBLE, 2),
                 new measureDef ("OperatingTime", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.DOUBLE, 2),
-                new measureDef ("energyDaily", "Metering", "TotWhOut", "", 14, "Wh", true, valueDTP.DOUBLE, 3),
+                new measureDef ("energyDaily", "Metering", "TotWhOut", "", 14, "Wh", true, valueDTP.DOUBLE, 2),
                 new measureDef ("evtDescription", "Operation", "Evt", "Dsc", 15, "String", false, valueDTP.STRING, 4),
                 new measureDef ("evtNo", "Operation", "Evt", "No", 16, "String", true, valueDTP.STRING, 4),
                 new measureDef ("evtNoShort", "Operation", "Evt", "NoShrt", 17, "String", false, valueDTP.STRING, 4),
@@ -538,8 +542,8 @@ namespace loadData
                 new measureDef ("isolationLeakRis", "Isolation", "LeakRis", "", 21, "String", false, valueDTP.M3DOUBLE, 4),
                 new measureDef ("gridSwitchCount", "Operation", "GriSwCnt", "", 22, "String", false, valueDTP.DOUBLE, 4),
                 new measureDef ("health", "Operation", "Health", "", 23, "String", false, valueDTP.STRING, 4),
-                new measureDef ("generated", "Computed", "generated", "", 24, "kWh", false, valueDTP.DOUBLE, 3),
-                new measureDef ("perfRatio", "Computed", "perf", "ratio", 25, "%", false, valueDTP.DOUBLE, 3)
+                new measureDef ("generated", "Computed", "generated", "", 24, "kWh", false, valueDTP.DOUBLE, 7),
+                new measureDef ("perfRatio", "Computed", "perf", "ratio", 25, "%", false, valueDTP.DOUBLE, 7)
             };
 
             foreach (measureDef mDef in measuresDef)

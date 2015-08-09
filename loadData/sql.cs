@@ -1,294 +1,11 @@
 ﻿/*  NEW TABLES
   Scripts creation solaSW !
  
-drop table inverter
-;
-drop table site
-;
-CREATE TABLE dbo.site(
-	-- company
-	company varchar(50) not NULL,
-
-	-- site specific information
-	name varchar(50) NOT NULL primary key,
-	longitude decimal(9, 6) default 0,
-	latitude decimal(9, 6) default 0,
-	city varchar(50) not null,
-	country varchar(50) not null,
-    sitePower bigint not null
- )
-;
-CREATE TABLE dbo.inverter(
-	siteName varchar(50) NOT NULL references site(name),
-	
-	-- Inverter specific information
-	serialNo varchar(50) NOT NULL primary key,
-	otherName varchar(50) not null,
-	inverterPower bigint not null,
-	model varchar(50) not null,
-	type tinyint not NULL,
-	sensorSN varchar(50) null
-)
-;
-drop table mDc_northHillFarm
-;
-CREATE TABLE dbo.mDc_northHillFarm(
-	dateMeasure dateTime NOT NULL,
-	invString varchar(50) NULL,
-	currentAmp decimal(18, 16) NULL,
-	voltage decimal(6, 3) NULL,
-	voltage_min decimal(6, 3) NULL,
-	voltage_max decimal(6, 3) NULL,
-	power decimal(18, 2) NULL,
-	power_min decimal(18, 2) NULL,
-	power_max decimal(18, 2) NULL,
-	modTemperature decimal(4, 2) NULL,
-	modTemperature_min decimal(4, 2) NULL,
-	modTemperature_max decimal(4, 2) NULL,
-	temperature decimal (4,2) null,
-	temperature_min decimal (4,2) null,
-	temperature_max decimal (4,2) null,
-	insolation int NULL,
-	insolation_min int NULL,
-	insolation_max int NULL,
-	windSpeed decimal(5, 2) NULL,
-	windSpeed_min decimal(5, 2) NULL,
-	windSpeed_max decimal(5, 2) NULL
-)
-;
-
- * 
- * 
- * 
- * 
- * 
-
- *********************
-/* OLD SCRIPT .....
-***********************
-CREATE TABLE [dbo].[misc_northHillFarm](
-	[dateMeasure] [dateTime] NOT NULL,
-	[inverter] [varchar](50) NULL,
-	[feedInTime] [decimal](18, 2) NULL,
-	[operatingTime] [decimal](18, 2) NULL,
-	[evtDescription] [varchar](255) NULL,
-	[evtNo] [varchar](255) NULL,
-	[evtNoShort] [varchar](4096) NULL,
-	[evtMsg] [varchar](255) NULL,
-	[evtPrior] [varchar](255) NULL,
-	[isolationLeakRis] [decimal](18, 2) NULL,
-	[gridSwitchCount] [decimal](18, 2) NULL,
-	[health] [varchar](255) NULL
-) ON [PRIMARY]
-GO
-select * from misc_northHillFarm where health != 'Ok'
-
-insert into misc_northHillFarm
-SELECT
-       convert(DateTime, convert(varchar(10), dateMeasure) + ' ' + convert(varchar(5), timeMeasure) )
-	  ,[inverter]
- 	  ,[time_FeedIn]
-	  ,[time_Operating]
-      ,[evt_Description]
-      ,[evt_No]
-      ,[evt_NoShort]
-      ,[evt_Msg]
-      ,[evt_Prior]
-      ,[isol_LeakRis]
-      ,[gridSwitchCount]
-      ,[health]
-  FROM [solarPlants].[dbo].[m_northHillFarm]
-  where stringNo is null
-
-GO
-
-CREATE TABLE [dbo].[mAc_northHillFarm](
-	[dateMeasure] [dateTime] NOT NULL,
-	[invPhase] [varchar](50) NULL,
-	[current] [decimal](18, 2) NULL,
-	[frequency] [decimal](18, 2) NULL,
-	[voltage] [decimal](18, 2) NULL,
-	[power] [decimal](18, 2) NULL,
-	[energyDaily] [decimal](18, 2) NULL,
-	[energyPrevious] [decimal](18, 2) NULL,
-	[isolationFlt] [decimal](18, 2) NULL,
-    generated as energyDaily - energyPrevious,
-) ON [PRIMARY]
-
-GO
-USE [solarPlants]
-GO
-
-insert into mAc_northHillFarm
-SELECT
-       convert(DateTime, convert(varchar(10), dateMeasure) + ' ' + convert(varchar(5), timeMeasure) )
-      ,[inverter]+case when stringNo = 'A' then 'Phase 1' when stringNo = 'B' then 'Phase 2' when stringNo = 'C' then 'Phase 3' when stringNo is null then '' else null END
-      ,[out_Current]
-      ,[out_Frequency]
-      ,[out_Voltage]
-      ,[out_ActivePower]
-      ,[Out_EnergyDaily]
-	  ,0
-      ,[isol_Flt]
-  FROM [solarPlants].[dbo].[m_northHillFarm]
-  where stringNo is null or
-  (stringNo = 'A' or stringNo = 'B' or stringNo = 'C')
-
-
-update mAc_northHillFarm set energyPrevious =  
-	(	select max(b.energyDaily) from mAc_northHillFarm b
-		where  mAc_northHillFarm.invPhase = b.invPhase
-		  and b.dateMeasure < mAc_northHillFarm.dateMeasure
-		  and datediff(day, mAc_northHillFarm.dateMeasure, b.dateMeasure) <=1
-		  and b.energyDaily <= mAc_northHillFarm.energyDaily
-		  and mAc_northHillFarm.energyDaily - b.EnergyDaily < 10000
-	)
-where 
-	invPhase not like '%Phase%' and
-	energyPrevious is null
-
-
-
-GO
-CREATE TABLE [dbo].[dateLine](
-	[dateTime] [dateTime] NOT NULL,
-	[day]  AS (datepart(day,[dateTime])),
-	[month]  AS (datepart(month,[dateTime])),
-	[year]  AS (datepart(year,[dateTime])),
-	[yearMonth]  AS (CONVERT([varchar](5),datepart(year,[dateTime]))+right('0'+CONVERT([varchar](2),datepart(month,[dateTime])),(2))),
-	[semester]  AS (CONVERT([int],datepart(month,[dateTime])/(6.0)+(0.9))),
-	[quarter]  AS (CONVERT([int],datepart(month,[dateTime])/(3.0)+(0.99))),
-	[hour] as (datepart(hour, [dateTime])),
-    YMD as convert(date, dateTime),
-PRIMARY KEY CLUSTERED 
-(
-	[dateTime] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
-insert dateLine
-select distinct convert(DateTime, convert(varchar(10), dateMeasure) + ' ' + convert(varchar(5), timeMeasure) ) from [solarPlants].[dbo].[m_northHillFarm]
-
-  
- * 
-
-drop table inverters
-CREATE TABLE [dbo].[inverters](
-	[company] [varchar](50) NULL,
-	[site] [varchar](50) NOT NULL,
-	[longitude] [decimal](9, 6) NULL,
-	[latitude] [decimal](9, 6) NULL,
-	city varchar(50) not null,
-	country varchar(50) not null,
-	power bigint not null,
-	[mainPanel] [varchar](50) NULL,
-	[distributionBoard] [varchar](50) NULL,
-	[inverter] [varchar](50) NOT NULL,
-	[invString] varchar(50) not null,
-	stringNo varchar(50) null,
-	[type] [tinyint] NULL,
-    
-PRIMARY KEY CLUSTERED 
-(
-	[invString] ASC, stringNo ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
-
- * 
-insert inverters
-select distinct  
-	'SolarSW', 'northHillFarm', 55, -2, 'LONDON', 'UK', 15000, 
-	'Panel 1', 'Board 1', inverter, inverter+case(stringNo) when 'C' then 'Phase 3' else stringNo END,
-	case(stringNo) when 'C' then 'Phase 3' else stringNo END, 0
-	from [solarPlants].[dbo].[m_northHillFarm]
-
-insert inverters
-select distinct  
-	'SolarSW', 'northHillFarm', 55, -2, 'LONDON', 'UK', 15000, 
-	'Panel 1', 'Board 1', inverter, inverter + 'Phase 1',
-	'Phase 1', 0
-	from [solarPlants].[dbo].[m_northHillFarm]
-	where stringNo = 'C'
-
-insert inverters
-select distinct  
-	'SolarSW', 'northHillFarm', 55, -2, 'LONDON', 'UK', 15000, 
-	'Panel 1', 'Board 1', inverter, inverter + 'Phase 2',
-	'Phase 2', 0
-	from [solarPlants].[dbo].[m_northHillFarm]
-	where stringNo = 'C'
-
- * 
- * get errors
-select dateMeasure, inverter, evtNo = convert(int, LEFT(evtNo, CHARINDEX('.', evtNo)-1)), evtNoShort = convert(int, LEFT(evtNoShort, CHARINDEX('.', evtNoShort)-1)), evtMsg, evtPrior, health 
-from misc_northHillFarm where 
-	health != 'Ok' or 
-	(evtNo is not null ) or 
-	(evtMsg is not null and evtMsg != 'None') or 
-	(evtNoShort is not null and evtNoShort != '0.00') or 
-	(evtPrior is not null and evtPrior != 'NonePrio')
- order by dateMeasure DESC
-  
- */
-
-
-/*
-drop table inverters;
-select distinct inverter from m_northHillFarm;
-create table inverters
-(company varchar(50),
- site varchar(50) not null,
- longitude decimal(9, 6),
- latitude decimal (9, 6),
- mainPanel varchar(50),
- distributionBoard varchar(50),
- inverter varchar(50) primary key,
- isItWebBox tinyint)
-
-insert into inverters
-select distinct 'SolarSW', 'northHillFarm',  50.1234, -2.5678, 'Panel1', 'Board 1', inverter, 0 from m_northHillFarm
-;
-update inverters set isItWebBox=1 where inverter ='155025205'
-
- * 
- * 
- * drop table p_northHillFarm
-;
-create table p_northHillFarm
-(datePrevi date not null,
- inverter varchar(50),
- isIsWebBox tinyint,
- out_ActivePower decimal(18,2)
- )
-
- insert into p_northHillFarm
- select dateMeasure, inverter, 0, sum(out_ActivePower) * (rand()+0.5) from m_northHillFarm
-   group by  dateMeasure, inverter
-
-   select * from p_northHillFarm order by datePrevi
-
-   update p_northHillFarm set isIsWebBox = 1 where inverter = '155025205'
 
  alter table m_northHillFarm
 add constraint FK_NorthHillFarmInverter foreign key(inverter)
   references inverters(inverter);
 
- * alter table p_northHillFarm
-add constraint FK_NorthHillFarmInverterPrevi foreign key(inverter)
-  references inverters(inverter);
-
- * alter table measures
-add constraint FK_AllInverter foreign key(inverter)
-  references inverters(inverter);
-
- * 
- * Idx:
-
-create index idx_northHillFarm_date on m_northHillFarm(dateMeasure)
-create index idx_measure_date on m_northHillFarm(inverter)
-create index idx_measure_date on measures(dateMeasure)
-create index idx_measure_inv on measures(inverter)
- 
- 
 -------------------------
    load date/hour Line
 -------------------------
@@ -361,11 +78,52 @@ namespace loadData
             }
         }
 
-//	[site] [varchar](50) not null,
-         void createTables(String siteName)
+        void createTables(String siteName)
         {
+            String strSql = "";
 
-         }
+            glob.allTables = new List<DataTable>();
+            for (int iTableDetail = 0; iTableDetail < glob.nbTablesDetail; iTableDetail++)
+            {
+                String tableName= "m_" + siteName + "_" + tableNames[iTableDetail];
+                strSql = "if not exists (select * from sysobjects where name='" + tableName  +"' and xtype='U') " +
+                    "create table " + tableName + " (inverter varchar(50) not null, aString varchar(50) not null, dateMeasure dateTime not null";
+
+                foreach (measureDef mDef in glob.allM.Values)
+                {
+                    int tableTarget = 1 << iTableDetail;
+                    if ((mDef.tableMask & tableTarget) == tableTarget)
+                    {
+                        List<DataColumn> dateCol = new List<DataColumn>();
+                        switch (mDef.valueDataType)
+                        {
+                            case valueDTP.INT:
+                                strSql += ", [" + mDef.name + "] int null";
+                                break;
+                            case valueDTP.DOUBLE:
+                                strSql += ", [" + mDef.name + "] float null";
+                                break;
+                            case valueDTP.STRING:
+                                strSql += ", [" + mDef.name + "] varchar(50) null";
+                                break;
+                            case valueDTP.M3INT:
+                                strSql += ", [" + mDef.name + "] int null";
+                                strSql += ", [" + mDef.name + "_max] int null";
+                                strSql += ", [" + mDef.name + "_min] int null";
+                                break;
+                            case valueDTP.M3DOUBLE:
+                                strSql += ", [" + mDef.name + "] float null";
+                                strSql += ", [" + mDef.name + "_max] float null";
+                                strSql += ", [" + mDef.name + "_min] float null";
+                                break;
+                        }
+                    }
+                }
+                strSql += ");";
+                using (SqlCommand cde = new SqlCommand(strSql, con))
+                    cde.ExecuteNonQuery();
+            }
+        }
         object getValueOrNull(String strVal)
          {
              try
@@ -462,21 +220,21 @@ namespace loadData
         public void prepareTable(String siteName)
         {
             glob.allTables = new List<DataTable>();
-            for (int i = 0; i < 3; i++)
+            for (int iTableDetail = 0; iTableDetail < glob.nbTablesDetail; iTableDetail++)
             {
-                DataTable measuresDT = new DataTable("m_" + siteName + "_" + tableNames[i]);
+                DataTable measuresDT = new DataTable("m_" + siteName + "_" + tableNames[iTableDetail]);
                 glob.allTables.Add(measuresDT);
 
                 DataColumn myDC = new DataColumn("inverter", Type.GetType("System.String"));
-                glob.allTables[i].Columns.Add(myDC);
+                glob.allTables[iTableDetail].Columns.Add(myDC);
                 myDC = new DataColumn("aString", Type.GetType("System.String"));
-                glob.allTables[i].Columns.Add(myDC);
+                glob.allTables[iTableDetail].Columns.Add(myDC);
                 myDC = new DataColumn("dateMeasure", Type.GetType("System.DateTime"));
-                glob.allTables[i].Columns.Add(myDC);
+                glob.allTables[iTableDetail].Columns.Add(myDC);
 
                 foreach (measureDef mDef in glob.allM.Values)
                 {
-                    int tableTarget = 1 << i;
+                    int tableTarget = 1 << iTableDetail;
                     if ((mDef.tableMask & tableTarget) == tableTarget)
                     {
                         List<DataColumn> dateCol = new List<DataColumn>();
@@ -503,7 +261,7 @@ namespace loadData
                                 break;
                         }
                         foreach (DataColumn dc in dateCol)
-                            glob.allTables[i].Columns.Add(dc);
+                            glob.allTables[iTableDetail].Columns.Add(dc);
                     }
                 }
             }
@@ -517,14 +275,14 @@ namespace loadData
                 List<Boolean> bFlush = new List<Boolean>();
                 glob.allRows = new List<DataRow>();
 
-                for (int i = 0; i < 1; i++)
+                for (int iTableDetail = 0; iTableDetail < glob.nbTablesDetail; iTableDetail++)
                 {
                     bFlush.Add(false);
-                    int tbMask = 1 << i;
-                    glob.allRows.Add( glob.allTables[i].NewRow());
-                    glob.allRows[i]["inverter"] = inverterSN;
-                    glob.allRows[i]["aString"] = aString;
-                    glob.allRows[i]["dateMeasure"] = dtM;
+                    int tbMask = 1 << iTableDetail;
+                    glob.allRows.Add( glob.allTables[iTableDetail].NewRow());
+                    glob.allRows[iTableDetail]["inverter"] = inverterSN;
+                    glob.allRows[iTableDetail]["aString"] = aString;
+                    glob.allRows[iTableDetail]["dateMeasure"] = dtM;
 
                     foreach (String internalMeasureName in measureInternalNameArray.Keys)
                     {
@@ -541,33 +299,37 @@ namespace loadData
                                 continue;
 
                             if (mDef.bFlushDBRow)
-                                bFlush[i] = true;
+                                bFlush[iTableDetail] = true;
 
                             switch (mDef.valueDataType)
                             {
                                 case valueDTP.INT:
                                 case valueDTP.DOUBLE:
                                 case valueDTP.STRING:
-                                    glob.allRows[i][mDef.name] = vals[indVal];
+                                    glob.allRows[iTableDetail][mDef.name] = vals[indVal];
                                     break;
                                 case valueDTP.M3INT:
                                     int[] varIntArr = (int[])vals[indVal];
-                                    glob.allRows[i][mDef.name] = varIntArr[0];
-                                    glob.allRows[i][mDef.name + "_min"] = varIntArr[1];
-                                    glob.allRows[i][mDef.name + "_max"] = varIntArr[2];
+                                    glob.allRows[iTableDetail][mDef.name] = varIntArr[0];
+                                    glob.allRows[iTableDetail][mDef.name + "_min"] = varIntArr[1];
+                                    glob.allRows[iTableDetail][mDef.name + "_max"] = varIntArr[2];
                                     break;
                                 case valueDTP.M3DOUBLE:
                                     Double[] varDblArr = (Double[])vals[indVal];
-                                    glob.allRows[i][mDef.name] = varDblArr[0];
-                                    glob.allRows[i][mDef.name + "_min"] = varDblArr[1];
-                                    glob.allRows[i][mDef.name + "_max"] = varDblArr[2];
+                                    glob.allRows[iTableDetail][mDef.name] = varDblArr[0];
+                                    glob.allRows[iTableDetail][mDef.name + "_min"] = varDblArr[1];
+                                    glob.allRows[iTableDetail][mDef.name + "_max"] = varDblArr[2];
                                     break;
                             }
                         }
                     }
-                    if (i >= glob.allRows.Count)
-                        if(bFlush[i])
+                    if (iTableDetail >= glob.allRows.Count)
+                        if(bFlush[iTableDetail])
                            glob.allRows.Add(null);
+                    if (glob.allRows[iTableDetail] != null)
+                        //if(glob.allTables[i].Rows.Count > 0)
+                        if(bFlush[iTableDetail])
+                            glob.allTables[iTableDetail].Rows.Add(glob.allRows[iTableDetail]);
                 }
             }
             catch(Exception ex)
@@ -577,31 +339,24 @@ namespace loadData
         }
         public void flushRow()
         {
-            for (int i = 0; i < 1; i++)
-            {
-                int tbMask = 1 << i;
-                if (glob.allRows[i] != null)
-                    //if(glob.allTables[i].Rows.Count > 0)
-                        glob.allTables[i].Rows.Add(glob.allRows[i]);
-            }
         }
         public void writeToDb()
         {
-            for (int i = 0; i < 1; i++)
+            for (int iTableDetail = 0; iTableDetail < glob.nbTablesDetail; iTableDetail++)
             {
-                if (glob.allTables[i].Rows.Count > 0)
+                if (glob.allTables[iTableDetail].Rows.Count > 0)
                 {
                     using (SqlConnection dbConnection = new SqlConnection(strConnect))
                     {
                         dbConnection.Open();
                         using (SqlBulkCopy s = new SqlBulkCopy(dbConnection))
                         {
-                            s.DestinationTableName = glob.allTables[i].TableName;
+                            s.DestinationTableName = glob.allTables[iTableDetail].TableName;
 
-                            foreach (var column in glob.allTables[i].Columns)
+                            foreach (var column in glob.allTables[iTableDetail].Columns)
                                 s.ColumnMappings.Add(column.ToString(), column.ToString());
 
-                            s.WriteToServer(glob.allTables[i]);
+                            s.WriteToServer(glob.allTables[iTableDetail]);
                         }
                     }
                 }
