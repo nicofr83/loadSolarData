@@ -30,10 +30,42 @@ CREATE TABLE dbo.inverter(
 	sensorSN varchar(50) null
 )
 ;
+drop table mDc_northHillFarm
+;
+CREATE TABLE dbo.mDc_northHillFarm(
+	dateMeasure dateTime NOT NULL,
+	invString varchar(50) NULL,
+	currentAmp decimal(18, 16) NULL,
+	voltage decimal(6, 3) NULL,
+	voltage_min decimal(6, 3) NULL,
+	voltage_max decimal(6, 3) NULL,
+	power decimal(18, 2) NULL,
+	power_min decimal(18, 2) NULL,
+	power_max decimal(18, 2) NULL,
+	modTemperature decimal(4, 2) NULL,
+	modTemperature_min decimal(4, 2) NULL,
+	modTemperature_max decimal(4, 2) NULL,
+	temperature decimal (4,2) null,
+	temperature_min decimal (4,2) null,
+	temperature_max decimal (4,2) null,
+	insolation int NULL,
+	insolation_min int NULL,
+	insolation_max int NULL,
+	windSpeed decimal(5, 2) NULL,
+	windSpeed_min decimal(5, 2) NULL,
+	windSpeed_max decimal(5, 2) NULL
+)
+;
 
+ * 
+ * 
+ * 
+ * 
+ * 
 
- 
+ *********************
 /* OLD SCRIPT .....
+***********************
 CREATE TABLE [dbo].[misc_northHillFarm](
 	[dateMeasure] [dateTime] NOT NULL,
 	[inverter] [varchar](50) NULL,
@@ -69,40 +101,6 @@ SELECT
   where stringNo is null
 
 GO
-
-
-
-CREATE TABLE [dbo].[mDc_northHillFarm](
-	[dateMeasure] [dateTime] NOT NULL,
-	[invString] [varchar](50) NULL,
-	[current] [decimal](18, 4) NULL,
-	[voltage] [decimal](18, 2) NULL,
-	[power] [decimal](18, 2) NULL,
-	[temp] [decimal](18, 2) NULL,
-	[insolation] [decimal](18, 2) NULL,
-	[windSpeed] [decimal](18, 2) NULL
-) ON [PRIMARY]
-
-GO
-USE [solarPlants]
-GO
-
-select * from mDc_northHillFarm
-delete from mDc_northHillFarm
-
-insert into mDc_northHillFarm
-SELECT
-       convert(DateTime, convert(varchar(10), dateMeasure) + ' ' + convert(varchar(5), timeMeasure) )
-      ,[inverter]+[stringNo]
-      ,[dc_Current]
-      ,[dc_Voltage]
-      ,[dc_Power]
-      ,[env_Temp]
-      ,[env_Insolation]
-      ,[env_WindSpeed]
-  FROM [solarPlants].[dbo].[m_northHillFarm]
-  where stringNo is not null and stringNo != 'C'
-
 
 CREATE TABLE [dbo].[mAc_northHillFarm](
 	[dateMeasure] [dateTime] NOT NULL,
@@ -340,11 +338,19 @@ namespace loadData
     {
         String strConnect = "Data Source=.; Initial Catalog = solarSW ; Integrated Security = true ; Connection Timeout=10 ; Min Pool Size=2 ; Max Pool Size=20;";
         SqlConnection con;
-        public dbserver(String siteName)
+        String[] tableNames = {
+            "DC",
+            "AC",
+            "Misc"
+        };
+        public dbserver()
         {
             con = new SqlConnection(strConnect);
             con.Open();
 
+        }
+        public void switchSite(String siteName)
+        {
             try
             {
                 createTables(siteName);
@@ -453,15 +459,153 @@ namespace loadData
             // select top 1 daily from table, where siteName, aString, <drMesure totWh not null order by date Desc
             return 0;
         }
+        public void prepareTable(String siteName)
+        {
+            glob.allTables = new List<DataTable>();
+            for (int i = 0; i < 3; i++)
+            {
+                DataTable measuresDT = new DataTable("m_" + siteName + "_" + tableNames[i]);
+                glob.allTables.Add(measuresDT);
+
+                DataColumn myDC = new DataColumn("inverter", Type.GetType("System.String"));
+                glob.allTables[i].Columns.Add(myDC);
+                myDC = new DataColumn("aString", Type.GetType("System.String"));
+                glob.allTables[i].Columns.Add(myDC);
+                myDC = new DataColumn("dateMeasure", Type.GetType("System.DateTime"));
+                glob.allTables[i].Columns.Add(myDC);
+
+                foreach (measureDef mDef in glob.allM.Values)
+                {
+                    int tableTarget = 1 << i;
+                    if ((mDef.tableMask & tableTarget) == tableTarget)
+                    {
+                        List<DataColumn> dateCol = new List<DataColumn>();
+                        switch (mDef.valueDataType)
+                        {
+                            case valueDTP.INT:
+                                dateCol.Add(new DataColumn(mDef.name, Type.GetType("System.Int32")));
+                                break;
+                            case valueDTP.DOUBLE:
+                                dateCol.Add(new DataColumn(mDef.name, Type.GetType("System.Double")));
+                                break;
+                            case valueDTP.STRING:
+                                dateCol.Add(new DataColumn(mDef.name, Type.GetType("System.String")));
+                                break;
+                            case valueDTP.M3INT:
+                                dateCol.Add(new DataColumn(mDef.name, Type.GetType("System.Int32")));
+                                dateCol.Add(new DataColumn(mDef.name+"_min", Type.GetType("System.Int32")));
+                                dateCol.Add(new DataColumn(mDef.name+"_max", Type.GetType("System.Int32")));
+                                break;
+                            case valueDTP.M3DOUBLE:
+                                dateCol.Add(new DataColumn(mDef.name, Type.GetType("System.Double")));
+                                dateCol.Add(new DataColumn(mDef.name + "_min", Type.GetType("System.Double")));
+                                dateCol.Add(new DataColumn(mDef.name + "_max", Type.GetType("System.Double")));
+                                break;
+                        }
+                        foreach (DataColumn dc in dateCol)
+                            glob.allTables[i].Columns.Add(dc);
+                    }
+                }
+            }
+        }
         public void prepareRow()
         {
-
         }
-        public void loadRow(measureDef mDef, valueDTP dType, object val){
+        public void loadRow(String inverterSN, String aString, DateTime dtM, Dictionary<String, int> measureInternalNameArray, List<object> vals){
+            try
+            {
+                List<Boolean> bFlush = new List<Boolean>();
+                glob.allRows = new List<DataRow>();
 
+                for (int i = 0; i < 1; i++)
+                {
+                    bFlush.Add(false);
+                    int tbMask = 1 << i;
+                    glob.allRows.Add( glob.allTables[i].NewRow());
+                    glob.allRows[i]["inverter"] = inverterSN;
+                    glob.allRows[i]["aString"] = aString;
+                    glob.allRows[i]["dateMeasure"] = dtM;
+
+                    foreach (String internalMeasureName in measureInternalNameArray.Keys)
+                    {
+                        int indVal = measureInternalNameArray[internalMeasureName];
+                        if (!measureInternalNameArray.ContainsKey(internalMeasureName))
+                            throw new Exception("sql.loadrow: Measure <" + internalMeasureName + "> not found in allM");
+                        measureDef mDef = glob.allM[internalMeasureName];
+                        if (indVal >= vals.Count)
+                            continue;
+
+                        if ((mDef.tableMask & tbMask) == tbMask)
+                        {
+                            if (vals[indVal] == null)
+                                continue;
+
+                            if (mDef.bFlushDBRow)
+                                bFlush[i] = true;
+
+                            switch (mDef.valueDataType)
+                            {
+                                case valueDTP.INT:
+                                case valueDTP.DOUBLE:
+                                case valueDTP.STRING:
+                                    glob.allRows[i][mDef.name] = vals[indVal];
+                                    break;
+                                case valueDTP.M3INT:
+                                    int[] varIntArr = (int[])vals[indVal];
+                                    glob.allRows[i][mDef.name] = varIntArr[0];
+                                    glob.allRows[i][mDef.name + "_min"] = varIntArr[1];
+                                    glob.allRows[i][mDef.name + "_max"] = varIntArr[2];
+                                    break;
+                                case valueDTP.M3DOUBLE:
+                                    Double[] varDblArr = (Double[])vals[indVal];
+                                    glob.allRows[i][mDef.name] = varDblArr[0];
+                                    glob.allRows[i][mDef.name + "_min"] = varDblArr[1];
+                                    glob.allRows[i][mDef.name + "_max"] = varDblArr[2];
+                                    break;
+                            }
+                        }
+                    }
+                    if (i >= glob.allRows.Count)
+                        if(bFlush[i])
+                           glob.allRows.Add(null);
+                }
+            }
+            catch(Exception ex)
+            {
+                throw ex;
+            }
         }
-        public void writeRow()
+        public void flushRow()
         {
+            for (int i = 0; i < 1; i++)
+            {
+                int tbMask = 1 << i;
+                if (glob.allRows[i] != null)
+                    //if(glob.allTables[i].Rows.Count > 0)
+                        glob.allTables[i].Rows.Add(glob.allRows[i]);
+            }
+        }
+        public void writeToDb()
+        {
+            for (int i = 0; i < 1; i++)
+            {
+                if (glob.allTables[i].Rows.Count > 0)
+                {
+                    using (SqlConnection dbConnection = new SqlConnection(strConnect))
+                    {
+                        dbConnection.Open();
+                        using (SqlBulkCopy s = new SqlBulkCopy(dbConnection))
+                        {
+                            s.DestinationTableName = glob.allTables[i].TableName;
+
+                            foreach (var column in glob.allTables[i].Columns)
+                                s.ColumnMappings.Add(column.ToString(), column.ToString());
+
+                            s.WriteToServer(glob.allTables[i]);
+                        }
+                    }
+                }
+            }
 
         }
 

@@ -9,6 +9,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Xml;
 using System.Xml.Linq;
+using System.Data;
 
 namespace loadData
 {
@@ -19,7 +20,9 @@ namespace loadData
         static public Dictionary<String, string> allMNames = new Dictionary<string, string>();
         static public ListBox lbResult;
         static public int MAX_VALUES = 30;
-        static public dbserver dbs;
+        static public dbserver dbs = new dbserver();
+        static public List<DataTable> allTables = new List<DataTable>();
+        static public List<DataRow> allRows = new List<DataRow>();
 
         private static glob _me = new glob();
 
@@ -140,9 +143,9 @@ namespace loadData
         public void runForThisSite(String siteName, String fileType)
         {
             Boolean bLoaded = false;
-            glob.dbs = new dbserver(siteName);
+            glob.dbs.switchSite(siteName);
 
-            String[] allFileNames = Directory.GetFiles(".", "*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
+            String[] allFileNames = Directory.GetFiles(".", "2015-07*." + ((fileType == "xml") ? "zip" : fileType), SearchOption.AllDirectories);
 
             switch (fileType.ToLower())
             {
@@ -163,43 +166,46 @@ namespace loadData
                     }
                     break;
                 case "xml":
+                    String fileNameRoot = "???";
                     foreach (String oneFile in allFileNames)
                     {
-                            if (!bLoaded)
+                        glob.lbResult.Items.Clear();
+                        glob.lbResult.Items.Add("new file: " + oneFile);
+                        if (!bLoaded)
                         {
                             glob.dbs.checkIfSiteExist(siteName);
                             glob.inverters = glob.dbs.loadInverters(siteName);
+                            fileNameRoot = oneFile.Substring(1, 7); 
                             bLoaded = true;
                         }
-                        if (glob.lbResult.Items.Count > 50)
+                        String[] fnSplitted = oneFile.Split(new char[] { '\\' });
+                        if (fileNameRoot != fnSplitted[fnSplitted.Count() -1 ].Substring(1, 7))
+                        {
                             glob.lbResult.Items.Clear();
+                            glob.lbResult.Items.Add("Saving data to the database");
+
+                            saveToDb(siteName);
+                            fileNameRoot = fnSplitted[fnSplitted.Count() - 1].Substring(1, 7);
+                            glob.lbResult.Items.Clear();
+                            glob.lbResult.Items.Add("new file: " + oneFile);
+                        }
+                        if (glob.lbResult.Items.Count > 50)
+                        {
+                            glob.lbResult.Items.Clear();
+                            glob.lbResult.Items.Add("new file: " + oneFile);
+                        }
                         glob.lbResult.Items.Add("Unzip: " + oneFile);
                         glob.lbResult.Refresh();
                         Application.DoEvents();
-                        using (var file = File.OpenRead(oneFile))
-                        {
-                            try
-                            {
-                                using (var zip = new ZipArchive(file, ZipArchiveMode.Read))
-                                {
-                                    foreach (var entry in zip.Entries)
-                                    {
-                                        //glob.lbResult.Items.Add("   file " + entry);
-                                        loadXml(siteName, entry.Open());
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                MessageBox.Show("File " + oneFile + " was not processed, Error: " + ex.Message + "\n" + ex.StackTrace);
-                            }
-                        }
+                        loadThisZipFile(siteName, oneFile);
                     }
-
+                    if(bLoaded)
+                        saveToDb(siteName);
                     break;
             }
-            if (!bLoaded)
-                return;
+        }
+        private void saveToDb(String siteName)
+        {
             // set default sensorBoxId
             glob.dbs.createMissingInverters(siteName);
             string sensorBoxId = null;
@@ -226,8 +232,26 @@ namespace loadData
             }
 
             uploadData(siteName);
-
-            glob.inverters = new Dictionary<string, inverter>();
+        }
+        private void loadThisZipFile(String siteName, String oneFile){
+            using (var file = File.OpenRead(oneFile))
+            {
+                try
+                {
+                    using (var zip = new ZipArchive(file, ZipArchiveMode.Read))
+                    {
+                        foreach (var entry in zip.Entries)
+                        {
+                            //glob.lbResult.Items.Add("   file " + entry);
+                            loadXml(siteName, entry.Open());
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("File " + oneFile + " was not processed, Error: " + ex.Message + "\n" + ex.StackTrace);
+                }
+            }
         }
         public void loadXml(String siteName, Stream strm)
         {
@@ -265,7 +289,7 @@ namespace loadData
 
                         if (!glob.inverters.ContainsKey(strInfo[1]))
                         {
-                            inv = new inverter("",siteName, 0, strInfo[1], "???", 0, strInfo[0]);
+                            inv = new inverter("???", siteName, 0, strInfo[1], strInfo[0], 0, "???");
                             glob.inverters.Add(inv.serialNo, inv);
                         }
                         else
@@ -331,37 +355,29 @@ namespace loadData
         }
         public void uploadData(string siteName)
         {
+            glob.dbs.prepareTable(siteName);
             foreach (inverter inv in glob.inverters.Values)
             {
                 stringVal strVal = inv.values;
+                // for all strings of this inverter
                 for (int iStrVal = 0; iStrVal < strVal.dVals.Count; iStrVal++)
                 {
                     String aString = strVal.stringNames[iStrVal];
                     dateVal dtVal = strVal.dVals[iStrVal];
 
+                    // for all dates of this string
                     foreach (DateTime aDate in dtVal.valsPerDate.Keys)
                     {
                         valueVal valVal = dtVal.valsPerDate[aDate];
-
                         List<object> objVal = (List<object>)valVal.val;
-
-                        glob.dbs.prepareRow();
-                        Boolean bFlushRow = false;
-
-                        foreach (String mInternalName in inv.measureInternalNameArray.Keys)
-                        {
-                            int iVal = inv.measureInternalNameArray[mInternalName];
-                            measureDef mDef = glob.allM[mInternalName];
-                            if (mDef.bFlushDBRow)
-                                bFlushRow = true;
-                            glob.dbs.loadRow(mDef, inv.dataTP[iVal], objVal[iVal]);
-                        }
-                        if (bFlushRow)
-                            glob.dbs.writeRow();
+                        glob.dbs.loadRow(inv.serialNo, aString, aDate, inv.measureInternalNameArray, objVal);
+                        glob.dbs.flushRow();
                     }
-
                 }
+                glob.dbs.writeToDb();
+                glob.dbs.prepareTable(siteName);
             }
+            glob.inverters = glob.dbs.loadInverters(siteName);
         }
         int getNodeValInt(XmlNode xnd, String key)
         {
@@ -398,6 +414,14 @@ namespace loadData
 
             String tmpStr = getNodeValueString(xnd, "Key");
             strRet = tmpStr.Split(new char[] { ':' });
+            if (strRet.Count() == 5)
+            {
+                String[] tmpStrArr = new String[3];
+                tmpStrArr[0] = strRet[0] + ":" + strRet[1] + ":" + strRet[2];
+                tmpStrArr[1] = strRet[3];
+                tmpStrArr[2] = strRet[4];
+                strRet = tmpStrArr;
+            }
             if (strRet.Count() == 4)
             {
                 String[] tmpStrArr = new String[3];
@@ -490,32 +514,32 @@ namespace loadData
             };
             List<measureDef> measuresDef = new List<measureDef>()
             {
-                new measureDef ("emptySolt", "NeverComeHere", "??", "", 0, "?", false, valueDTP.STRING),
-                new measureDef ("dc_Current", "DcMs", "Amp", "", 1, "A", true, valueDTP.DOUBLE),
-                new measureDef ("dc_Voltage","DcMs", "Vol", "", 2, "V", true, valueDTP.M3DOUBLE),
-                new measureDef ("dc_Power", "DcMs", "Watt", "", 3, "W", true, valueDTP.M3DOUBLE),
-                new measureDef ("environmentTemp", "Env", "TmpVal", "", 4, "C", true, valueDTP.M3DOUBLE),
-                new measureDef ("envirnomentTotalInsolation", "Env", "TotInsol", "", 5, "w/m2", true, valueDTP.M3DOUBLE),
-                new measureDef ("envirnomentWindspeed", "Env", "HorWSpd", "", 6, "m/s", true, valueDTP.M3DOUBLE),
-                new measureDef ("current", "GridMs", "A", "", 7, "A", true, valueDTP.M3DOUBLE),
-                new measureDef ("frequency", "GridMs", "Hz", "", 8, "Hz", true, valueDTP.M3DOUBLE),
-                new measureDef ("voltage", "GridMs", "PhV", "", 9, "V", true, valueDTP.M3DOUBLE),
-                new measureDef ("activePower", "GridMs", "TotW", "", 10, "W", true, valueDTP.M3DOUBLE),
-                new measureDef ("mod_Temp", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE),
-                new measureDef ("time_FeedIn", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.DOUBLE),
-                new measureDef ("time_Operating", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.DOUBLE),
-                new measureDef ("Out_EnergyDaily", "Metering", "TotWhOut", "", 14, "Wh", true, valueDTP.DOUBLE),
-                new measureDef ("evt_Description", "Operation", "Evt", "Dsc", 15, "String", false, valueDTP.STRING),
-                new measureDef ("evt_No", "Operation", "Evt", "No", 16, "String", true, valueDTP.STRING),
-                new measureDef ("evt_NoShort", "Operation", "Evt", "NoShrt", 17, "String", false, valueDTP.STRING),
-                new measureDef ("evt_Msg", "Operation", "Evt", "Msg", 18, "String", true, valueDTP.STRING),
-                new measureDef ("evt_Prior", "Operation", "Evt", "Prio", 19, "String", false, valueDTP.STRING),
-                new measureDef ("isol_Flt", "Isolation", "Flt", "", 20, "String", false, valueDTP.M3DOUBLE),
-                new measureDef ("isol_LeakRis", "Isolation", "LeakRis", "", 21, "String", false, valueDTP.M3DOUBLE),
-                new measureDef ("gridSwitchCount", "Operation", "GriSwCnt", "", 22, "String", false, valueDTP.DOUBLE),
-                new measureDef ("Health", "Operation", "Health", "", 23, "String", false, valueDTP.STRING),
-                new measureDef ("generated", "Computed", "generated", "", 24, "kWh", false, valueDTP.DOUBLE),
-                new measureDef ("perf_ratio", "Computed", "perf", "ratio", 25, "%", false, valueDTP.DOUBLE)
+                new measureDef ("emptySolt", "NeverComeHere", "??", "", 0, "?", false, valueDTP.STRING, 0),
+                new measureDef ("currentAmp", "DcMs", "Amp", "", 1, "A", true, valueDTP.DOUBLE, 1),
+                new measureDef ("voltage","DcMs", "Vol", "", 2, "V", true, valueDTP.M3DOUBLE, 1),
+                new measureDef ("power", "DcMs", "Watt", "", 3, "W", true, valueDTP.M3DOUBLE, 1),
+                new measureDef ("temperature", "Env", "TmpVal", "", 4, "C", true, valueDTP.M3DOUBLE, 3),
+                new measureDef ("insolation", "Env", "TotInsol", "", 5, "w/m2", true, valueDTP.M3INT, 3),
+                new measureDef ("windspeed", "Env", "HorWSpd", "", 6, "m/s", true, valueDTP.M3DOUBLE, 4),
+                new measureDef ("current", "GridMs", "A", "", 7, "A", true, valueDTP.M3DOUBLE, 2),
+                new measureDef ("frequency", "GridMs", "Hz", "", 8, "Hz", true, valueDTP.M3DOUBLE, 2),
+                new measureDef ("voltage", "GridMs", "PhV", "", 9, "V", true, valueDTP.M3DOUBLE, 2),
+                new measureDef ("activePower", "GridMs", "TotW", "", 10, "W", true, valueDTP.M3DOUBLE, 2),
+                new measureDef ("modTemperature", "Mdul", "TmpVal", "", 11, "C", false, valueDTP.M3DOUBLE, 3),
+                new measureDef ("feedInTime", "Metering", "TotFeedTms", "", 12, "?", false, valueDTP.DOUBLE, 2),
+                new measureDef ("OperatingTime", "Metering", "TotOpTms", "", 13, "h", false, valueDTP.DOUBLE, 2),
+                new measureDef ("energyDaily", "Metering", "TotWhOut", "", 14, "Wh", true, valueDTP.DOUBLE, 3),
+                new measureDef ("evtDescription", "Operation", "Evt", "Dsc", 15, "String", false, valueDTP.STRING, 4),
+                new measureDef ("evtNo", "Operation", "Evt", "No", 16, "String", true, valueDTP.STRING, 4),
+                new measureDef ("evtNoShort", "Operation", "Evt", "NoShrt", 17, "String", false, valueDTP.STRING, 4),
+                new measureDef ("evtMessage", "Operation", "Evt", "Msg", 18, "String", true, valueDTP.STRING, 4),
+                new measureDef ("evtPrior", "Operation", "Evt", "Prio", 19, "String", false, valueDTP.STRING, 4),
+                new measureDef ("isolationFlt", "Isolation", "Flt", "", 20, "String", false, valueDTP.M3DOUBLE, 4),
+                new measureDef ("isolationLeakRis", "Isolation", "LeakRis", "", 21, "String", false, valueDTP.M3DOUBLE, 4),
+                new measureDef ("gridSwitchCount", "Operation", "GriSwCnt", "", 22, "String", false, valueDTP.DOUBLE, 4),
+                new measureDef ("health", "Operation", "Health", "", 23, "String", false, valueDTP.STRING, 4),
+                new measureDef ("generated", "Computed", "generated", "", 24, "kWh", false, valueDTP.DOUBLE, 3),
+                new measureDef ("perfRatio", "Computed", "perf", "ratio", 25, "%", false, valueDTP.DOUBLE, 3)
             };
 
             foreach (measureDef mDef in measuresDef)
@@ -547,8 +571,9 @@ namespace loadData
             public string unit;
             public bool bFlushDBRow;
             public valueDTP valueDataType;
+            public int tableMask;
 
-            public measureDef(string name, string root, string suffix1, string suffix2, int id, string unit, bool bFlushDBRow, valueDTP valueDataType)
+            public measureDef(string name, string root, string suffix1, string suffix2, int id, string unit, bool bFlushDBRow, valueDTP valueDataType, int tableMask)
             {
 
                 this.name = name;
@@ -561,6 +586,7 @@ namespace loadData
                 this.unit = unit;
                 this.bFlushDBRow = bFlushDBRow;
                 this.valueDataType = valueDataType;
+                this.tableMask = tableMask;
             }
         }
 
@@ -687,7 +713,7 @@ namespace loadData
             this.siteName = siteName;
             this.sitePower = sitePower;
             this.serialNo = serialNo;
-            this.otherName = siteName;
+            this.otherName = otherName;
             this.inverterPower=inverterPower;
             this.model = model;
             this.type = type;
@@ -702,10 +728,10 @@ namespace loadData
                 inverterPower = 0;
                 long.TryParse(output, out inverterPower);
             }
-            if (this.model.ToLower().Contains("webbox"))
+            if (this.otherName.ToLower().Contains("webbox"))
                 this.type = invType.WEBBOX;
             else
-                if (this.model.ToLower().Contains("sensor"))
+                if (this.otherName.ToLower().Contains("sensor"))
                     this.type = invType.SENSOR;
             this.values = new stringVal();
         }
@@ -805,64 +831,72 @@ namespace loadData
         }
         public void computeRatios()
         {
-            double previousTotWhOut;
-            double currentTotWhOut;
-            DateTime previousDate;
-            double generated;
-            double perfRatio;
-            int dailyCol, geneCol=-1, ratioCol=-1;
-
-            // Metering.TotWhOut
-            if (this.type != invType.INVERTER)
-                return;
-            stringVal strVal = this.values;
-            if(!measureInternalNameArray.ContainsKey("Metering-TotWhOut"))
-                return;
-            dailyCol = measureInternalNameArray["Metering-TotWhOut"];
-            for (int iStrVal = 0; iStrVal < strVal.dVals.Count; iStrVal++)
+            try
             {
-                String aString = strVal.stringNames[iStrVal];
-                dateVal dtVal = strVal.dVals[iStrVal];
-                if(dtVal.valsPerDate == null || dtVal.valsPerDate.Count == 0)
-                    continue;
-                DateTime dtFirst = dtVal.valsPerDate.Keys.First();
-                previousTotWhOut = glob.dbs.getPreviousDaily(siteName, aString, dtFirst, out previousDate);
+                double previousTotWhOut;
+                double currentTotWhOut;
+                DateTime previousDate;
+                double generated;
+                double perfRatio;
+                int dailyCol, geneCol = -1, ratioCol = -1;
 
-                foreach (DateTime aDate in dtVal.valsPerDate.Keys)
+                // Metering.TotWhOut
+                if (this.type != invType.INVERTER)
+                    return;
+                stringVal strVal = this.values;
+                if (!measureInternalNameArray.ContainsKey("Metering-TotWhOut"))
+                    return;
+                dailyCol = measureInternalNameArray["Metering-TotWhOut"];
+                for (int iStrVal = 0; iStrVal < strVal.dVals.Count; iStrVal++)
                 {
-                    valueVal valVal = dtVal.valsPerDate[aDate];
-
-                    List<object> lstVal = (List<object>)valVal.val;
-                    if (lstVal == null || dailyCol > lstVal.Count || lstVal[dailyCol] == null)
+                    String aString = strVal.stringNames[iStrVal];
+                    dateVal dtVal = strVal.dVals[iStrVal];
+                    if (dtVal.valsPerDate == null || dtVal.valsPerDate.Count == 0)
                         continue;
+                    DateTime dtFirst = dtVal.valsPerDate.Keys.First();
+                    previousTotWhOut = glob.dbs.getPreviousDaily(siteName, aString, dtFirst, out previousDate);
 
-                    if (aDate == dtFirst)
+                    foreach (DateTime aDate in dtVal.valsPerDate.Keys)
                     {
-                        geneCol = getColNo(aDate, "Computed.generated", aString);
-                        ratioCol = getColNo(aDate, "Computed.perf.ratio", aString);
+                        if (aDate == dtFirst)
+                        {
+                            geneCol = getColNo(aDate, "Computed.generated", aString);
+                            ratioCol = getColNo(aDate, "Computed.perf.ratio", aString);
+                        }
+                        valueVal valVal = dtVal.valsPerDate[aDate];
+
+                        List<object> lstVal = (List<object>)valVal.val;
+                        if (lstVal == null || dailyCol >= lstVal.Count || lstVal[dailyCol] == null)
+                            continue;
+
+                        currentTotWhOut = (Double)lstVal[dailyCol];
+
+                        switch (validateDailyHisto(previousDate, aDate, previousTotWhOut, currentTotWhOut))
+                        {
+                            case histoValidation.OK:
+                                generated = currentTotWhOut - previousTotWhOut;
+                                this.values.setValue(aDate, aString, geneCol, (object)generated);
+                                break;
+                            case histoValidation.IGNORE_MEASURE:
+                                break;
+                            case histoValidation.RESET_VALUE:
+                                this.values.setValue(aDate, aString, geneCol, (object)0);
+                                break;
+                        }
+                        previousDate = aDate;
+                        previousTotWhOut = currentTotWhOut;
+
+                        // compute perf ratio
+                        Random rd = new Random(DateTime.Now.Millisecond);
+
+                        perfRatio = rd.Next(60, 100);
+                        this.values.setValue(aDate, aString, ratioCol, perfRatio);
                     }
-                    currentTotWhOut = (Double) lstVal[dailyCol];
-
-                    switch (validateDailyHisto(previousDate, aDate, previousTotWhOut, currentTotWhOut)){
-                        case histoValidation.OK:
-                            generated = currentTotWhOut - previousTotWhOut;
-                            this.values.setValue(aDate, aString, geneCol, (object)generated);
-                            break;
-                        case histoValidation.IGNORE_MEASURE:
-                            break;
-                        case histoValidation.RESET_VALUE:
-                            this.values.setValue(aDate, aString, geneCol, (object)0);
-                            break;
-                    }
-                    previousDate = aDate;
-                    previousTotWhOut = currentTotWhOut;
-
-                    // compute perf ratio
-                    Random rd = new Random(DateTime.Now.Millisecond);
-
-                    perfRatio = rd.Next(60, 100);
-                    this.values.setValue(aDate, aString, ratioCol, perfRatio);
                 }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
             }
         }
         enum histoValidation {OK, IGNORE_MEASURE, RESET_VALUE};
